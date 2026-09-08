@@ -9,6 +9,8 @@ from fastapi import FastAPI, status
 from pydantic import BaseModel, ConfigDict
 
 from app.auth.gateway import SupabaseAuthGateway
+from app.catalog.gateway import SupabaseCatalogueGateway
+from app.catalog.router import router as catalogue_router
 from app.config import load_settings
 from app.routers.users import router as users_router
 
@@ -25,11 +27,15 @@ class HealthResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-    """Create and close the shared authentication HTTP client."""
+    """Create and close the shared outbound Supabase HTTP client."""
 
     settings = load_settings()
     async with httpx.AsyncClient() as client:
         application.state.auth_gateway = SupabaseAuthGateway(
+            client=client,
+            settings=settings,
+        )
+        application.state.catalogue_gateway = SupabaseCatalogueGateway(
             client=client,
             settings=settings,
         )
@@ -55,3 +61,4 @@ async def get_health() -> HealthResponse:
 
 
 app.include_router(users_router)
+app.include_router(catalogue_router)

@@ -3,7 +3,7 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
 class AuthenticatedUser(BaseModel):
@@ -12,6 +12,15 @@ class AuthenticatedUser(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
 
     user_id: UUID
+
+
+class AuthenticatedRequestContext(BaseModel):
+    """Private verified identity plus a non-serializable bearer credential."""
+
+    model_config = ConfigDict(frozen=True, strict=True)
+
+    user_id: UUID
+    access_token: SecretStr = Field(exclude=True, repr=False)
 
 
 class MeResponse(BaseModel):

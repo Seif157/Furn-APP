@@ -2,12 +2,15 @@
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from uuid import UUID
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from app.auth.dependencies import get_auth_gateway
 from app.auth.gateway import AuthenticationGateway, SupabaseAuthGateway
+from app.auth.models import AuthenticatedRequestContext
 from app.config import Settings
 from app.main import app
 
@@ -42,6 +45,18 @@ def anyio_backend() -> str:
     """Run async endpoint tests with the standard-library asyncio backend."""
 
     return "asyncio"
+
+
+def test_authenticated_request_context_never_serializes_or_displays_token() -> None:
+    context = AuthenticatedRequestContext(
+        user_id=UUID(TEST_USER_ID),
+        access_token=SecretStr(TEST_ACCESS_TOKEN),
+    )
+
+    assert context.model_dump() == {"user_id": UUID(TEST_USER_ID)}
+    assert context.model_dump_json() == f'{{"user_id":"{TEST_USER_ID}"}}'
+    assert TEST_ACCESS_TOKEN not in repr(context)
+    assert TEST_ACCESS_TOKEN not in str(context)
 
 
 def build_test_settings() -> Settings:

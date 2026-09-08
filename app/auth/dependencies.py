@@ -3,13 +3,14 @@
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request, status
+from pydantic import SecretStr
 
 from app.auth.gateway import (
     AuthenticationGateway,
     AuthenticationServiceUnavailableError,
     InvalidAccessTokenError,
 )
-from app.auth.models import AuthenticatedUser
+from app.auth.models import AuthenticatedRequestContext, AuthenticatedUser
 
 
 def _authentication_required() -> HTTPException:
@@ -68,15 +69,31 @@ async def get_auth_gateway(request: Request) -> AuthenticationGateway:
         raise _authentication_service_unavailable() from None
 
 
-async def get_current_user(
+async def get_authenticated_request(
     access_token: Annotated[str, Depends(get_bearer_token)],
     gateway: Annotated[AuthenticationGateway, Depends(get_auth_gateway)],
-) -> AuthenticatedUser:
-    """Return the user identity only after Supabase verifies the access token."""
+) -> AuthenticatedRequestContext:
+    """Verify credentials and retain the token only in a private safe context."""
 
     try:
-        return await gateway.authenticate(access_token)
+        user = await gateway.authenticate(access_token)
     except InvalidAccessTokenError:
         raise _invalid_access_token() from None
     except AuthenticationServiceUnavailableError:
         raise _authentication_service_unavailable() from None
+
+    return AuthenticatedRequestContext(
+        user_id=user.user_id,
+        access_token=SecretStr(access_token),
+    )
+
+
+async def get_current_user(
+    authenticated_request: Annotated[
+        AuthenticatedRequestContext,
+        Depends(get_authenticated_request),
+    ],
+) -> AuthenticatedUser:
+    """Preserve the public Phase 2 dependency's minimal user contract."""
+
+    return AuthenticatedUser(user_id=authenticated_request.user_id)
