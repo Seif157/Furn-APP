@@ -10,20 +10,48 @@ from app.auth.models import AuthenticatedRequestContext
 from app.catalog.upstream_models import UpstreamProduct
 from app.config import Settings
 
+CATALOG_ROOT_SELECT = (
+    "id,name,description,price,discount_price,"
+    "width:width_cm,height:height_cm,depth:depth_cm,weight:weight_kg,"
+    "materials,lifecycle_state"
+)
+CATALOG_ENRICHMENT_SELECT = (
+    "enrichment_assignments:product_enrichment_assignment!"
+    "product_enrichment_assignment_product_fk("
+    "attribute_id,confirmation_state,"
+    "attribute:product_enrichment_attribute!"
+    "product_enrichment_assignment_attribute_fk("
+    "id,kind:attribute_kind,value:attribute_value"
+    ")"
+    ")"
+)
 CATALOG_SELECT = (
-    "id,name,description,price,discount_price,width,height,depth,weight,materials,"
-    "lifecycle_state,"
+    f"{CATALOG_ROOT_SELECT},"
     "category:category!inner(id,name,is_active),"
     "seller:marketplace_party!inner(id,business_name,approval_state),"
     "colors:product_color!inner(id,color_value,stock_quantity,display_order),"
     "images:product_image(id,image_url,is_primary,display_order,product_color_id),"
-    "enrichment_assignments:product_enrichment_assignment("
-    "id,confirmation_state,value,"
-    "attribute:product_enrichment_attribute(id,kind)"
-    ")"
+    f"{CATALOG_ENRICHMENT_SELECT}"
 )
 
 _PRODUCTS_ADAPTER = TypeAdapter(tuple[UpstreamProduct, ...])
+
+
+def catalogue_query_params() -> dict[str, str]:
+    """Build the exact filtered and deterministically ordered production query."""
+
+    return {
+        "select": CATALOG_SELECT,
+        "lifecycle_state": "eq.published",
+        "seller.approval_state": "eq.approved",
+        "category.is_active": "eq.true",
+        "colors.stock_quantity": "gt.0",
+        "enrichment_assignments.confirmation_state": "eq.party_confirmed",
+        "order": "id.asc",
+        "colors.order": "display_order.asc,id.asc",
+        "images.order": "is_primary.desc,display_order.asc,id.asc",
+        "enrichment_assignments.order": "attribute_id.asc",
+    }
 
 
 class CatalogueUpstreamError(Exception):
@@ -73,7 +101,7 @@ class SupabaseCatalogueGateway:
         limit: int,
         offset: int,
     ) -> tuple[UpstreamProduct, ...]:
-        params = self._base_query_params()
+        params = catalogue_query_params()
         params.update(
             {
                 "limit": str(limit + 1),
@@ -91,7 +119,7 @@ class SupabaseCatalogueGateway:
         authenticated_request: AuthenticatedRequestContext,
         product_id: UUID,
     ) -> UpstreamProduct | None:
-        params = self._base_query_params()
+        params = catalogue_query_params()
         params.update(
             {
                 "id": f"eq.{product_id}",
@@ -103,21 +131,6 @@ class SupabaseCatalogueGateway:
             params=params,
         )
         return products[0] if products else None
-
-    @staticmethod
-    def _base_query_params() -> dict[str, str]:
-        return {
-            "select": CATALOG_SELECT,
-            "lifecycle_state": "eq.published",
-            "seller.approval_state": "eq.approved",
-            "category.is_active": "eq.true",
-            "colors.stock_quantity": "gt.0",
-            "enrichment_assignments.confirmation_state": "eq.party_confirmed",
-            "order": "id.asc",
-            "colors.order": "display_order.asc,id.asc",
-            "images.order": "is_primary.desc,display_order.asc,id.asc",
-            "enrichment_assignments.order": "id.asc",
-        }
 
     async def _request_products(
         self,

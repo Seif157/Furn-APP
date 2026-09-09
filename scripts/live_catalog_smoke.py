@@ -2,19 +2,35 @@
 
 import asyncio
 import getpass
+import json
 import logging
+import re
 import sys
 import warnings
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Literal, NoReturn
 from uuid import UUID, uuid4
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    TypeAdapter,
+    ValidationError,
+)
 
 from app.auth.models import AuthenticatedRequestContext, MeResponse
+from app.catalog.gateway import (
+    CATALOG_ROOT_SELECT,
+    CATALOG_SELECT,
+    catalogue_query_params,
+)
 from app.catalog.models import ProductListResponse, ProductResponse
-from app.catalog.transform import is_recommendation_eligible
+from app.catalog.transform import build_product_response, is_recommendation_eligible
+from app.catalog.upstream_models import UpstreamProduct
 from app.config import Settings, load_settings
 from app.main import app
 
@@ -47,6 +63,181 @@ SAFE_API_ERROR_CODES = frozenset(
         "invalid_access_token",
         "product_not_found",
     }
+)
+CONSTRAINT_PATTERN = re.compile(r"\b[A-Za-z][A-Za-z0-9_]{0,122}_(?:fk|fkey)\b")
+
+
+@dataclass(frozen=True, slots=True)
+class DiagnosticStage:
+    """One cumulative, one-row PostgREST diagnostic query."""
+
+    name: str
+    select: str
+    relationship_candidate: str
+    use_production_params: bool = False
+    query_params: tuple[tuple[str, str], ...] = ()
+
+
+DIAGNOSTIC_ROOT_COLUMNS = (
+    "id",
+    "name",
+    "description",
+    "price",
+    "discount_price",
+    "width_cm",
+    "height_cm",
+    "depth_cm",
+    "weight_kg",
+    "materials",
+    "lifecycle_state",
+)
+DIAGNOSTIC_ROOT_SELECT = CATALOG_ROOT_SELECT
+DIAGNOSTIC_ROOT_COLUMN_STAGES = tuple(
+    DiagnosticStage(
+        name=f"root_product.{column}",
+        select=",".join(DIAGNOSTIC_ROOT_COLUMNS[:index]),
+        relationship_candidate=f"product.{column}",
+    )
+    for index, column in enumerate(DIAGNOSTIC_ROOT_COLUMNS, start=1)
+)
+DIAGNOSTIC_CATEGORY_SELECT = (
+    f"{DIAGNOSTIC_ROOT_SELECT},category:category!product_category_fk(id,name,is_active)"
+)
+DIAGNOSTIC_SELLER_SELECT = (
+    f"{DIAGNOSTIC_CATEGORY_SELECT},"
+    "seller:marketplace_party!product_party_fk(id,business_name,approval_state)"
+)
+DIAGNOSTIC_COLORS_SELECT = (
+    f"{DIAGNOSTIC_SELLER_SELECT},"
+    "colors:product_color!product_color_product_fk("
+    "id,color_value,stock_quantity,display_order"
+    ")"
+)
+DIAGNOSTIC_IMAGES_SELECT = (
+    f"{DIAGNOSTIC_COLORS_SELECT},"
+    "images:product_image!product_image_product_fk("
+    "id,image_url,is_primary,display_order,product_color_id"
+    ")"
+)
+DIAGNOSTIC_ASSIGNMENT_PRODUCT_ID_SELECT = (
+    f"{DIAGNOSTIC_IMAGES_SELECT},"
+    "enrichment_assignments:product_enrichment_assignment!"
+    "product_enrichment_assignment_product_fk(product_id)"
+)
+DIAGNOSTIC_ASSIGNMENT_ATTRIBUTE_ID_SELECT = (
+    f"{DIAGNOSTIC_IMAGES_SELECT},"
+    "enrichment_assignments:product_enrichment_assignment!"
+    "product_enrichment_assignment_product_fk(product_id,attribute_id)"
+)
+DIAGNOSTIC_ASSIGNMENTS_SELECT = (
+    f"{DIAGNOSTIC_IMAGES_SELECT},"
+    "enrichment_assignments:product_enrichment_assignment!"
+    "product_enrichment_assignment_product_fk("
+    "product_id,attribute_id,confirmation_state"
+    ")"
+)
+DIAGNOSTIC_ASSIGNMENT_FILTER = (
+    ("enrichment_assignments.confirmation_state", "eq.party_confirmed"),
+)
+DIAGNOSTIC_ATTRIBUTE_RELATION_SELECT = (
+    f"{DIAGNOSTIC_IMAGES_SELECT},"
+    "enrichment_assignments:product_enrichment_assignment!"
+    "product_enrichment_assignment_product_fk("
+    "product_id,attribute_id,confirmation_state,"
+    "attribute:product_enrichment_attribute!"
+    "product_enrichment_assignment_attribute_fk()"
+    ")"
+)
+DIAGNOSTIC_ATTRIBUTE_ID_SELECT = DIAGNOSTIC_ATTRIBUTE_RELATION_SELECT.replace(
+    "product_enrichment_assignment_attribute_fk()",
+    "product_enrichment_assignment_attribute_fk(id)",
+)
+DIAGNOSTIC_ATTRIBUTE_KIND_SELECT = DIAGNOSTIC_ATTRIBUTE_RELATION_SELECT.replace(
+    "product_enrichment_assignment_attribute_fk()",
+    "product_enrichment_assignment_attribute_fk(id,attribute_kind)",
+)
+DIAGNOSTIC_ATTRIBUTE_SELECT = DIAGNOSTIC_ATTRIBUTE_RELATION_SELECT.replace(
+    "product_enrichment_assignment_attribute_fk()",
+    "product_enrichment_assignment_attribute_fk(id,attribute_kind,attribute_value)",
+)
+
+_DIAGNOSTIC_PRODUCTS_ADAPTER = TypeAdapter(tuple[UpstreamProduct, ...])
+
+
+DIAGNOSTIC_STAGES = (
+    *DIAGNOSTIC_ROOT_COLUMN_STAGES,
+    DiagnosticStage("root_product", DIAGNOSTIC_ROOT_SELECT, "product"),
+    DiagnosticStage(
+        "category_relationship",
+        DIAGNOSTIC_CATEGORY_SELECT,
+        "category!product_category_fk",
+    ),
+    DiagnosticStage(
+        "marketplace_party_relationship",
+        DIAGNOSTIC_SELLER_SELECT,
+        "marketplace_party!product_party_fk",
+    ),
+    DiagnosticStage(
+        "product_color_relationship",
+        DIAGNOSTIC_COLORS_SELECT,
+        "product_color!product_color_product_fk",
+    ),
+    DiagnosticStage(
+        "product_image_relationship",
+        DIAGNOSTIC_IMAGES_SELECT,
+        "product_image!product_image_product_fk",
+    ),
+    DiagnosticStage(
+        "enrichment_assignment_relationship",
+        DIAGNOSTIC_ASSIGNMENT_PRODUCT_ID_SELECT,
+        "product_enrichment_assignment.product_id",
+    ),
+    DiagnosticStage(
+        "enrichment_assignment_attribute_id",
+        DIAGNOSTIC_ASSIGNMENT_ATTRIBUTE_ID_SELECT,
+        "product_enrichment_assignment.attribute_id",
+    ),
+    DiagnosticStage(
+        "enrichment_assignment_confirmation_state",
+        DIAGNOSTIC_ASSIGNMENTS_SELECT,
+        "product_enrichment_assignment.confirmation_state",
+    ),
+    DiagnosticStage(
+        "enrichment_assignment_filter",
+        DIAGNOSTIC_ASSIGNMENTS_SELECT,
+        "enrichment_assignments.confirmation_state",
+        query_params=DIAGNOSTIC_ASSIGNMENT_FILTER,
+    ),
+    DiagnosticStage(
+        "enrichment_attribute_relationship",
+        DIAGNOSTIC_ATTRIBUTE_RELATION_SELECT,
+        "product_enrichment_attribute!product_enrichment_assignment_attribute_fk",
+        query_params=DIAGNOSTIC_ASSIGNMENT_FILTER,
+    ),
+    DiagnosticStage(
+        "enrichment_attribute_id",
+        DIAGNOSTIC_ATTRIBUTE_ID_SELECT,
+        "product_enrichment_attribute.id",
+        query_params=DIAGNOSTIC_ASSIGNMENT_FILTER,
+    ),
+    DiagnosticStage(
+        "enrichment_attribute_attribute_kind",
+        DIAGNOSTIC_ATTRIBUTE_KIND_SELECT,
+        "product_enrichment_attribute.attribute_kind",
+        query_params=DIAGNOSTIC_ASSIGNMENT_FILTER,
+    ),
+    DiagnosticStage(
+        "enrichment_attribute_attribute_value",
+        DIAGNOSTIC_ATTRIBUTE_SELECT,
+        "product_enrichment_attribute.attribute_value",
+        query_params=DIAGNOSTIC_ASSIGNMENT_FILTER,
+    ),
+    DiagnosticStage(
+        "production_filters_and_ordering",
+        CATALOG_SELECT,
+        "production_catalogue_query",
+        use_production_params=True,
+    ),
 )
 
 
@@ -92,6 +283,36 @@ def report_result(
         fields.append(f"product_count={product_count}")
     if classification is not None:
         fields.append(f"safe_error_classification={classification}")
+    print(" ".join(fields), flush=True)
+
+
+def report_diagnostic(
+    *,
+    stage: str,
+    status: Literal["passed", "failed"],
+    http_status: int,
+    relationship_candidate: str,
+    postgrest_error_code: str | None = None,
+    field_path: str | None = None,
+    expected_json_type: str | None = None,
+    received_json_type: str | None = None,
+) -> None:
+    """Print only allow-listed schema and JSON-type diagnostic metadata."""
+
+    fields = [
+        f"stage={stage}",
+        f"status={status}",
+        f"http_status={http_status}",
+        f"relationship_candidate={relationship_candidate}",
+    ]
+    if postgrest_error_code is not None:
+        fields.append(f"postgrest_error_code={postgrest_error_code}")
+    if field_path is not None:
+        fields.append(f"field_path={field_path}")
+    if expected_json_type is not None:
+        fields.append(f"expected_json_type={expected_json_type}")
+    if received_json_type is not None:
+        fields.append(f"received_json_type={received_json_type}")
     print(" ".join(fields), flush=True)
 
 
@@ -239,6 +460,244 @@ def safe_api_error_classification(response: httpx.Response) -> str:
     except (KeyError, TypeError, ValueError):
         return "unexpected_http_status"
     return code if code in SAFE_API_ERROR_CODES else "unexpected_http_status"
+
+
+def extract_constraint_candidates(payload: object) -> tuple[str, ...]:
+    """Extract only constraint-shaped identifiers from PostgREST error metadata."""
+
+    candidates: set[str] = set()
+
+    def visit(value: object) -> None:
+        if isinstance(value, str):
+            candidates.update(CONSTRAINT_PATTERN.findall(value))
+        elif isinstance(value, Mapping):
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(payload)
+    return tuple(sorted(candidates))
+
+
+def postgrest_error_metadata(
+    response: httpx.Response,
+    *,
+    fallback_candidate: str,
+) -> tuple[str | None, str]:
+    """Reduce a PostgREST failure to allow-listed schema metadata."""
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return None, fallback_candidate
+
+    raw_code = payload.get("code") if isinstance(payload, Mapping) else None
+    code = (
+        raw_code.upper()
+        if isinstance(raw_code, str)
+        and re.fullmatch(r"[A-Za-z0-9]{3,16}", raw_code) is not None
+        else None
+    )
+    relationship_metadata = (
+        [payload.get("details"), payload.get("hint")]
+        if isinstance(payload, Mapping)
+        else []
+    )
+    candidates = extract_constraint_candidates(relationship_metadata)
+    candidate = "|".join(candidates) if candidates else fallback_candidate
+    return code, candidate
+
+
+def json_type(value: object) -> str:
+    """Return a value-free JSON type name."""
+
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, Mapping):
+        return "object"
+    return "unknown"
+
+
+def expected_json_type(error_type: str) -> str:
+    """Map a Pydantic error category to a safe expected JSON type."""
+
+    if error_type == "missing":
+        return "required_field"
+    if "bool" in error_type:
+        return "boolean"
+    if "int" in error_type or "float" in error_type:
+        return "number"
+    if "decimal" in error_type:
+        return "number_or_string"
+    if "list" in error_type or "tuple" in error_type:
+        return "array"
+    if "dict" in error_type or "model" in error_type:
+        return "object"
+    if any(name in error_type for name in ("string", "uuid", "url")):
+        return "string"
+    if "literal" in error_type:
+        return "declared_literal"
+    if "json" in error_type:
+        return "valid_json"
+    return "declared_type"
+
+
+def validation_field_path(location: tuple[object, ...]) -> str:
+    """Format only model field names and list indexes from a validation error."""
+
+    path = "$"
+    for part in location:
+        if isinstance(part, int):
+            path += f"[{part}]"
+        elif isinstance(part, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part):
+            path += f".{part}"
+        else:
+            path += ".unknown"
+    return path
+
+
+async def diagnose_catalogue_integration(
+    *,
+    settings: Settings,
+    session: PasswordSession,
+) -> None:
+    """Locate a live PostgREST or local validation failure without exposing data."""
+
+    endpoint = f"{str(settings.supabase_url).rstrip('/')}/rest/v1/product"
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {session.access_token.get_secret_value()}",
+        "apikey": settings.supabase_publishable_key.get_secret_value(),
+    }
+    last_response: httpx.Response | None = None
+
+    async with httpx.AsyncClient() as client:
+        for stage in DIAGNOSTIC_STAGES:
+            if stage.use_production_params:
+                params = catalogue_query_params()
+            else:
+                params = {"select": stage.select}
+                params.update(stage.query_params)
+            params["limit"] = "1"
+            params.pop("offset", None)
+            try:
+                response = await client.get(
+                    endpoint,
+                    params=params,
+                    headers=headers,
+                    timeout=settings.supabase_auth_timeout_seconds,
+                )
+            except (httpx.TimeoutException, httpx.RequestError):
+                report_diagnostic(
+                    stage=stage.name,
+                    status="failed",
+                    http_status=0,
+                    relationship_candidate=stage.relationship_candidate,
+                )
+                return
+
+            last_response = response
+            if response.status_code != httpx.codes.OK:
+                code, candidate = postgrest_error_metadata(
+                    response,
+                    fallback_candidate=stage.relationship_candidate,
+                )
+                report_diagnostic(
+                    stage=stage.name,
+                    status="failed",
+                    http_status=response.status_code,
+                    relationship_candidate=candidate,
+                    postgrest_error_code=code,
+                )
+                return
+
+            report_diagnostic(
+                stage=stage.name,
+                status="passed",
+                http_status=response.status_code,
+                relationship_candidate=stage.relationship_candidate,
+            )
+
+    if last_response is None:
+        return
+
+    try:
+        json.loads(last_response.content)
+    except (TypeError, ValueError):
+        report_diagnostic(
+            stage="pydantic_models",
+            status="failed",
+            http_status=last_response.status_code,
+            relationship_candidate="UpstreamProduct",
+            field_path="$",
+            expected_json_type="array",
+            received_json_type="invalid_json",
+        )
+        return
+
+    try:
+        products = _DIAGNOSTIC_PRODUCTS_ADAPTER.validate_json(
+            last_response.content,
+            strict=True,
+        )
+    except ValidationError as error:
+        first_error = error.errors(include_url=False)[0]
+        location = tuple(first_error.get("loc", ()))
+        error_type = str(first_error.get("type", ""))
+        report_diagnostic(
+            stage="pydantic_models",
+            status="failed",
+            http_status=last_response.status_code,
+            relationship_candidate="UpstreamProduct",
+            field_path=validation_field_path(location),
+            expected_json_type=expected_json_type(error_type),
+            received_json_type=json_type(first_error.get("input")),
+        )
+        return
+
+    report_diagnostic(
+        stage="pydantic_models",
+        status="passed",
+        http_status=last_response.status_code,
+        relationship_candidate="UpstreamProduct",
+    )
+
+    try:
+        transformed = tuple(build_product_response(product) for product in products)
+    except Exception:
+        report_diagnostic(
+            stage="transformation_logic",
+            status="failed",
+            http_status=last_response.status_code,
+            relationship_candidate="build_product_response",
+        )
+        return
+
+    if products and any(product is None for product in transformed):
+        report_diagnostic(
+            stage="transformation_logic",
+            status="failed",
+            http_status=last_response.status_code,
+            relationship_candidate="build_product_response",
+        )
+        return
+
+    report_diagnostic(
+        stage="transformation_logic",
+        status="passed",
+        http_status=last_response.status_code,
+        relationship_candidate="build_product_response",
+    )
 
 
 def validate_health(response: httpx.Response) -> None:
@@ -472,6 +931,15 @@ async def run_live_checks(
                 params={"limit": DEFAULT_LIMIT, "offset": DEFAULT_OFFSET},
                 headers=request_headers,
             )
+            if (
+                list_response.status_code == 502
+                and safe_api_error_classification(list_response)
+                == "catalogue_upstream_error"
+            ):
+                await diagnose_catalogue_integration(
+                    settings=settings,
+                    session=session,
+                )
             catalogue = validate_catalogue(list_response)
             report_result(
                 check="catalogue_list",

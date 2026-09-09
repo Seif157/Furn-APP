@@ -14,9 +14,12 @@ from app.auth.gateway import AuthenticationGateway
 from app.auth.models import AuthenticatedUser
 from app.catalog.dependencies import get_catalogue_gateway
 from app.catalog.gateway import (
+    CATALOG_ENRICHMENT_SELECT,
+    CATALOG_ROOT_SELECT,
     CATALOG_SELECT,
     CatalogueGateway,
     SupabaseCatalogueGateway,
+    catalogue_query_params,
 )
 from app.config import Settings
 from app.main import app
@@ -189,39 +192,39 @@ def product_payload(
         ],
         "enrichment_assignments": [
             {
-                "id": "73000000-0000-4000-8000-000000000000",
+                "attribute_id": "83000000-0000-4000-8000-000000000000",
                 "confirmation_state": "party_confirmed",
-                "value": "contemporary",
                 "attribute": {
                     "id": "83000000-0000-4000-8000-000000000000",
                     "kind": "style",
+                    "value": "contemporary",
                 },
             },
             {
-                "id": "71000000-0000-4000-8000-000000000000",
+                "attribute_id": "81000000-0000-4000-8000-000000000000",
                 "confirmation_state": "ai_proposed",
-                "value": "private AI suggestion",
                 "attribute": {
                     "id": "81000000-0000-4000-8000-000000000000",
                     "kind": "material_hint",
+                    "value": "private AI suggestion",
                 },
             },
             {
-                "id": "72000000-0000-4000-8000-000000000000",
+                "attribute_id": "82000000-0000-4000-8000-000000000000",
                 "confirmation_state": "party_confirmed",
-                "value": "classic",
                 "attribute": {
                     "id": "82000000-0000-4000-8000-000000000000",
                     "kind": "style",
+                    "value": "classic",
                 },
             },
             {
-                "id": "70000000-0000-4000-8000-000000000000",
+                "attribute_id": "80000000-0000-4000-8000-000000000000",
                 "confirmation_state": "party_confirmed",
-                "value": "warm",
                 "attribute": {
                     "id": "80000000-0000-4000-8000-000000000000",
                     "kind": "color_family",
+                    "value": "warm",
                 },
             },
         ],
@@ -308,6 +311,44 @@ def assert_catalogue_request(request: httpx.Request) -> None:
     assert params["order"] == "id.asc"
     assert params["colors.order"] == "display_order.asc,id.asc"
     assert params["images.order"] == "is_primary.desc,display_order.asc,id.asc"
+    assert params["enrichment_assignments.order"] == "attribute_id.asc"
+
+
+def test_catalogue_select_aliases_verified_measurement_columns() -> None:
+    assert CATALOG_ROOT_SELECT.split(",") == [
+        "id",
+        "name",
+        "description",
+        "price",
+        "discount_price",
+        "width:width_cm",
+        "height:height_cm",
+        "depth:depth_cm",
+        "weight:weight_kg",
+        "materials",
+        "lifecycle_state",
+    ]
+    assert CATALOG_SELECT.startswith(f"{CATALOG_ROOT_SELECT},category:")
+
+    params = catalogue_query_params()
+    assert params["lifecycle_state"] == "eq.published"
+    assert params["order"] == "id.asc"
+
+
+def test_catalogue_select_matches_composite_enrichment_assignment_schema() -> None:
+    assert CATALOG_ENRICHMENT_SELECT == (
+        "enrichment_assignments:product_enrichment_assignment!"
+        "product_enrichment_assignment_product_fk("
+        "attribute_id,confirmation_state,"
+        "attribute:product_enrichment_attribute!"
+        "product_enrichment_assignment_attribute_fk("
+        "id,kind:attribute_kind,value:attribute_value))"
+    )
+    assert CATALOG_SELECT.endswith(CATALOG_ENRICHMENT_SELECT)
+
+    params = catalogue_query_params()
+    assert params["enrichment_assignments.confirmation_state"] == ("eq.party_confirmed")
+    assert params["enrichment_assignments.order"] == "attribute_id.asc"
 
 
 def unexpected_catalogue_call(_request: httpx.Request) -> httpx.Response:

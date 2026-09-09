@@ -68,19 +68,19 @@ def build_product_response(product: UpstreamProduct) -> ProductResponse | None:
     enrichment_attributes = tuple(
         EnrichmentAttributeResponse(
             kind=assignment.attribute.kind,
-            value=assignment.value,
+            value=assignment.attribute.value,
         )
         for assignment in sorted(
             confirmed_assignments,
             key=lambda assignment: (
                 assignment.attribute.kind,
                 json.dumps(
-                    assignment.value,
+                    assignment.attribute.value,
                     ensure_ascii=True,
                     separators=(",", ":"),
                     sort_keys=True,
                 ),
-                assignment.id.int,
+                assignment.attribute_id.int,
             ),
         )
     )

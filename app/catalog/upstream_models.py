@@ -48,12 +48,12 @@ class UpstreamProductImage(StrictUpstreamModel):
 class UpstreamEnrichmentAttribute(StrictUpstreamModel):
     id: UUID
     kind: str
+    value: JsonValue
 
 
 class UpstreamEnrichmentAssignment(StrictUpstreamModel):
-    id: UUID
+    attribute_id: UUID
     confirmation_state: Literal["ai_proposed", "party_confirmed"]
-    value: JsonValue
     attribute: UpstreamEnrichmentAttribute
 
 
