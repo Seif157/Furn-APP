@@ -171,47 +171,86 @@ ORDER BY table_name, policy_name;
 
 
 -- 04. INSERT/UPDATE column privileges on marketplace_party.
-WITH audit_roles(role_name, display_order) AS (
+--
+-- Use the privilege-check functions with catalog OIDs throughout. In
+-- particular, do not concatenate or explode table/column ACL arrays here:
+-- column ACL values can differ in shape from relation ACL values and previously
+-- caused "ACL arrays must be one-dimensional" in the SQL Editor.
+WITH requested_roles(role_name, display_order) AS (
     VALUES
         ('anon'::text, 1),
         ('authenticated'::text, 2),
         ('service_role'::text, 3)
 ),
+audit_roles AS (
+    SELECT
+        requested.role_name,
+        requested.display_order,
+        role_row.oid AS role_oid
+    FROM requested_roles AS requested
+    LEFT JOIN pg_catalog.pg_roles AS role_row
+        ON role_row.rolname = requested.role_name
+),
+target_table AS (
+    SELECT c.oid AS table_oid
+    FROM pg_catalog.pg_class AS c
+    JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relname = 'marketplace_party'
+      AND c.relkind IN ('r', 'p')
+),
 target_columns AS (
     SELECT
-        ordinal_position,
-        column_name
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'marketplace_party'
+        attribute.attnum AS ordinal_position,
+        attribute.attname AS column_name
+    FROM target_table AS target
+    JOIN pg_catalog.pg_attribute AS attribute
+        ON attribute.attrelid = target.table_oid
+    WHERE attribute.attnum > 0
+      AND NOT attribute.attisdropped
 )
 SELECT
     r.role_name,
+    r.role_oid IS NOT NULL AS role_exists,
+    target.table_oid IS NOT NULL AS table_exists,
     c.ordinal_position,
     c.column_name,
-    has_table_privilege(
-        r.role_name,
-        'public.marketplace_party',
-        'INSERT'
-    ) AS table_insert_granted,
-    has_column_privilege(
-        r.role_name,
-        'public.marketplace_party',
-        c.column_name,
-        'INSERT'
-    ) AS effective_column_insert,
-    has_table_privilege(
-        r.role_name,
-        'public.marketplace_party',
-        'UPDATE'
-    ) AS table_update_granted,
-    has_column_privilege(
-        r.role_name,
-        'public.marketplace_party',
-        c.column_name,
-        'UPDATE'
-    ) AS effective_column_update
+    CASE
+        WHEN r.role_oid IS NULL OR target.table_oid IS NULL THEN NULL
+        ELSE pg_catalog.has_table_privilege(
+            r.role_oid,
+            target.table_oid,
+            'INSERT'
+        )
+    END AS table_insert_granted,
+    CASE
+        WHEN r.role_oid IS NULL OR target.table_oid IS NULL THEN NULL
+        ELSE pg_catalog.has_column_privilege(
+            r.role_oid,
+            target.table_oid,
+            c.ordinal_position,
+            'INSERT'
+        )
+    END AS effective_column_insert,
+    CASE
+        WHEN r.role_oid IS NULL OR target.table_oid IS NULL THEN NULL
+        ELSE pg_catalog.has_table_privilege(
+            r.role_oid,
+            target.table_oid,
+            'UPDATE'
+        )
+    END AS table_update_granted,
+    CASE
+        WHEN r.role_oid IS NULL OR target.table_oid IS NULL THEN NULL
+        ELSE pg_catalog.has_column_privilege(
+            r.role_oid,
+            target.table_oid,
+            c.ordinal_position,
+            'UPDATE'
+        )
+    END AS effective_column_update
 FROM audit_roles AS r
+CROSS JOIN (SELECT table_oid FROM target_table) AS target
 CROSS JOIN target_columns AS c
 ORDER BY r.display_order, c.ordinal_position;
 

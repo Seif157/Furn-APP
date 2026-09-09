@@ -114,7 +114,10 @@ guard may be encapsulated in another securely implemented helper function.
 **Why:** RLS protects rows, not individual columns. This section checks both
 table-level and column-effective `INSERT`/`UPDATE` privileges for every
 `marketplace_party` column, with explicit attention to `approval_state` and
-`state_reason`.
+`state_reason`. The query resolves roles, the table, and columns through
+PostgreSQL catalog OIDs and calls `has_table_privilege` and
+`has_column_privilege` directly. It does not concatenate or expand mixed ACL
+arrays, avoiding the SQL Editor error `ACL arrays must be one-dimensional`.
 
 **Safe result:** `anon` cannot insert or update marketplace parties. The safest
 authenticated configuration denies effective writes to both protected state
