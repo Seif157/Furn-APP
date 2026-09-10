@@ -1,235 +1,298 @@
 # Phase 3.2B: Supabase security remediation package
 
-Phase 3.2B turns the confirmed Phase 3.2A findings into reviewable SQL. No SQL
-in this package has been run against Supabase, no migration has been applied,
-and no application rows or credentials were used. The FastAPI endpoints and
-their response contracts are unchanged.
+Phase 3.2B converts the live read-only audit evidence into reviewable SQL. No
+SQL in this package has been run against Supabase. The core migration is ready
+for another human review, not yet approved for staging or production.
 
-The package consists of:
+The package contains:
 
-- [`phase-3.2b-security-hardening.sql`](../sql/phase-3.2b-security-hardening.sql),
-  the transactional forward migration draft;
-- [`phase-3.2b-security-hardening-verify.sql`](../sql/phase-3.2b-security-hardening-verify.sql),
-  numbered, metadata-only post-migration checks;
-- [`phase-3.2b-helper-function-definitions.sql`](../sql/phase-3.2b-helper-function-definitions.sql),
-  the read-only query required before changing deployed helper functions; and
-- [`test_phase_3_2b_security_sql.py`](../tests/test_phase_3_2b_security_sql.py),
-  deterministic local regression tests for the SQL package.
+- `sql/phase-3.2b-security-hardening.sql`: core transactional migration.
+- `sql/phase-3.2b-security-hardening-verify.sql`: read-only post-migration
+  verification, including a final section summary.
+- `sql/phase-3.2b-helper-function-definitions.sql`: read-only helper diagnostic.
+- `sql/phase-3.2b-supabase-admin-default-privileges-diagnostic.sql`: read-only
+  managed-role default-ACL and authority diagnostic.
+- `sql/phase-3.2b-supabase-admin-default-privileges-optional.sql`: isolated,
+  optional managed-role migration. It must not be bundled with the core change.
 
 ## Confirmed findings
 
-The supplied audit evidence confirms:
+- **Critical - seller self-approval:** `authenticated` had table-level INSERT
+  on all eight `marketplace_party` columns. Its only applicable INSERT policy
+  checked `user_id = auth.uid()` but did not force pending approval or a null
+  state reason.
+- **Critical - broad direct writes:** `anon` had direct write and dangerous
+  maintenance privileges across all 34 public base tables.
+- **Critical - financial view:** `order_financial_position` was postgres-owned,
+  used owner-rights behavior, and was selectable by anonymous callers.
+- **High - catalogue exposure:** public category, product, enrichment, and child
+  policies did not collectively enforce all active, published, approved-seller,
+  and party-confirmed conditions.
+- **High - mixed policies:** anonymous and seller-owner access shared policies
+  that called security-definer helpers.
+- **High - helper hardening:** the three audited security-definer helpers used
+  `search_path = public, pg_temp` and were executable by PUBLIC and anon.
+- **High - future defaults:** postgres and the managed `supabase_admin` role had
+  client-facing default privileges. Their scopes and operational ownership must
+  be handled separately.
 
-- **Critical — seller self-approval:** `authenticated` has table-level INSERT
-  across `marketplace_party`; the INSERT policy only binds `user_id` to
-  `auth.uid()`. A seller can explicitly submit `approval_state` and
-  `state_reason`, and no state-protection trigger exists.
-- **Critical/high — excessive client grants:** `anon` has direct INSERT, UPDATE,
-  DELETE, TRUNCATE, REFERENCES, and TRIGGER privileges on all 34 public tables.
-  `authenticated` also has unnecessary structural/maintenance privileges.
-- **Critical — financial view boundary:** `order_financial_position` is owned by
-  `postgres`, uses owner-rights behavior, reads order/payment relations, and is
-  selectable by `anon` and `authenticated`.
-- **High — catalogue disclosure:** public category access does not require an
-  active category; product access does not require an approved seller; and
-  enrichment-assignment access does not require `party_confirmed`.
-- **Critical/high — catalogue child writes:** seller write policies on colors,
-  images, 3D models, and enrichment assignments do not require an approved
-  marketplace party.
-- **High — unsafe future defaults:** objects created by `postgres` or
-  `supabase_admin` automatically acquire client table/sequence privileges or
-  function execution.
-- **High — broad helper execution:** the three requested helpers are
-  `STABLE SECURITY DEFINER`, use `search_path = public, pg_temp`, and are
-  executable by PUBLIC and client roles.
+All 34 public base tables have RLS enabled and at least one policy. None has
+FORCE RLS. Nineteen unrelated policies use `FOR ALL`; their operation-specific
+semantics remain deferred to Phase 3.2C.
 
-The audit also confirms two positive controls: all 34 public tables have RLS and
-at least one policy. None uses FORCE RLS; this is not direct client exposure
-because client roles are not expected to own tables or bypass RLS.
+## Fail-closed preflight
 
-## Remediation decisions
+The core migration performs every preflight check before its first DDL or DCL
+statement. It verifies:
 
-### Seller approval
+- PostgreSQL version and the exact required roles.
+- Set equality for the exact 34-table inventory using bidirectional `EXCEPT`.
+  Array order cannot affect the result. An exception reports exact missing and
+  unexpected table names, but no application rows.
+- RLS on every reviewed table.
+- The eight `marketplace_party` columns, generated ID default, pending approval
+  default, the single authenticated INSERT policy, and the exact audited INSERT
+  and UPDATE privilege shape.
+- The financial view's existence, owner-rights state, postgres owner, and exact
+  pre-migration SELECT grantees.
+- The exact names, SELECT command, permissive mode, roles, and required predicate
+  shape for the six mixed policies being narrowed.
+- The absence of prior `phase32b_` policy artifacts.
+- A separate applicable permissive authenticated seller-write policy for every
+  child write operation that receives a restrictive guard.
+- The exact zero-argument helper signatures, owner, language, volatility,
+  security mode, configured search path, and normalized deployed bodies.
+- Only the postgres-owned default-ACL scopes changed by the core migration:
+  public-schema tables and sequences, and global functions.
+- The executor's authority for postgres-owned operations. Core deployment does
+  not require or assume authority over `supabase_admin`.
 
-The migration removes table-level INSERT from `authenticated`, then grants only
-`user_id`, `business_name`, `business_description`, `logo_url`, and
-`coverage_area`. It explicitly denies INSERT on `id`, `approval_state`, and
-`state_reason`, leaving the database-generated UUID default intact. It locates
-the single audited authenticated INSERT policy by catalog metadata and changes
-its `WITH CHECK` to require the authenticated user, `pending` state, and a null
-reason. Existing authenticated UPDATE column grants are not broadened or
-rewritten. Anonymous marketplace-party writes are removed, while `service_role`
-is untouched.
+Any drift aborts before changes. The migration is deliberately one transaction.
 
-Column grants and RLS are independent controls. RLS alone is not treated as
-column protection.
+## Operational timeouts
 
-### Financial view
+Immediately after `BEGIN`, the core and optional migrations set transaction-local
+safeguards:
 
-The migration removes PUBLIC/anonymous SELECT, keeps explicit authenticated and
-service-role SELECT, and sets `security_invoker = true`. Underlying table grants
-and RLS are therefore evaluated as the caller. The verification script checks
-both the reloption and effective grants.
+```sql
+SET LOCAL lock_timeout = '5s';
+SET LOCAL statement_timeout = '5min';
+SET LOCAL idle_in_transaction_session_timeout = '5min';
+```
 
-### Catalogue policies
+Any timeout rolls back the transaction. Investigate lock contention, statement
+behavior, deployment authority, or schema drift before retrying. Never bypass a
+timeout by directly increasing it in production.
 
-New restrictive policies constrain the existing permissive policies:
+## Exact existing-object grants
 
-- categories require `is_active = true` for client-public reads;
-- public products require `published`, an approved seller, and an active
-  category;
-- authenticated sellers receive an explicit permissive path for their own
-  draft/unpublished products;
-- enrichment assignments require `party_confirmed` for public reads while their
-  owning seller may inspect unconfirmed assignments;
-- color, image, 3D-model, and assignment reads require a parent product visible
-  under the public/owner/admin product rules; and
-- INSERT, UPDATE, and DELETE on the four child relations add restrictive
-  approved-owner-or-admin checks.
+The core migration uses explicit reviewed table lists; it does not use an
+uncontrolled `ON ALL TABLES` operation.
 
-The product policy queries only the seller and category parent relations. It
-never queries a product child. Child policies query the parent product, so the
-policy dependency direction remains one-way and does not create product/child
-RLS recursion. Admin branches remain explicit. `service_role` grants and bypass
-behavior are not reduced.
+For all 34 tables it removes INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES,
+TRIGGER, and, on PostgreSQL 17 or newer, MAINTAIN from PUBLIC and anon. It removes
+TRUNCATE, REFERENCES, TRIGGER, and MAINTAIN from authenticated. Service-role
+privileges are not changed.
 
-The FastAPI query still applies the Phase 3.1 eligibility filters independently;
-RLS is the database security boundary, not a replacement for the API contract.
+PUBLIC and anon SELECT are removed from the inventory before SELECT is granted
+back explicitly to this 12-table anonymous allowlist:
 
-### Grants and future defaults
+- `category`, `custom_offering`, `marketplace_party`, `party_capability`
+- `product`, `product_3d_model`, `product_color`
+- `product_enrichment_assignment`, `product_enrichment_attribute`
+- `product_image`, `review`, `service_type`
 
-The final migration must explicitly list all 34 reviewed public base tables.
-For those existing tables it removes anon write/structural/maintenance grants
-and authenticated TRUNCATE, REFERENCES, TRIGGER, and MAINTAIN. Audit Sections 02
-and 03 must also be used to form an explicit list of tables that do not have an
-intentional anonymous read surface; anon SELECT is removed from that list and
-retained only for the reviewed public tables. The migration must not use
-`ON ALL TABLES IN SCHEMA`, because an unreviewed or extension-owned future
-relation could otherwise be changed silently.
+The other 22 tables remain private to anonymous callers.
 
-For future objects created by both `postgres` and `supabase_admin`, the draft
-removes automatic client privileges on tables and sequences and automatic
-function execution. A creating migration must grant only what its workflow
-needs. Both global and `public`-specific default ACL entries are removed because
-a schema-specific REVOKE cannot cancel a grant inherited from global defaults.
-The forward migration preflight fails clearly unless its executor can alter
-defaults for both owner roles.
+## Marketplace-party writes
 
-## Required preflight blockers
+The migration revokes authenticated table-level INSERT and UPDATE, then revokes
+column-level INSERT and UPDATE over all eight reviewed columns before regranting.
 
-The forward file is intentionally non-deployable in its current review state.
-Its executable stop occurs before all DDL/DCL and therefore rolls the transaction
-back without changes.
+Authenticated INSERT is granted only on:
 
-Two metadata inputs are absent from the repository and supplied evidence:
+- `user_id`
+- `business_name`
+- `business_description`
+- `logo_url`
+- `coverage_area`
 
-1. **Exact 34-table and anon-read lists.** Run Sections 01, 02, and 03 of
-   [`phase-3.2-rls-audit.sql`](../sql/phase-3.2-rls-audit.sql). Copy only the
-   `table_name` values for public base/partitioned tables into the first two
-   explicit REVOKE statements described at the blocker. Confirm there are
-   exactly 34 and review every name. Build the third explicit list from tables
-   that lack an intentional anon SELECT policy. Remove the blocking `DO` only
-   after both reviews.
-2. **Exact helper bodies.** Run
-   [`phase-3.2b-helper-function-definitions.sql`](../sql/phase-3.2b-helper-function-definitions.sql).
-   The result contains only function metadata/source, not application rows.
-   Review the exact three definitions before writing a separate follow-up.
+Authenticated UPDATE is granted only on:
 
-Do not replace either missing input with inferred table names or invented
-function behavior.
+- `business_name`
+- `business_description`
+- `logo_url`
+- `coverage_area`
 
-## Helper-function follow-up
+INSERT remains denied on `id`, `approval_state`, and `state_reason`. UPDATE
+remains denied on `id`, `user_id`, `approval_state`, and `state_reason`. The
+single seller INSERT policy is retained by name discovered in preflight and its
+`WITH CHECK` is hardened to require the caller's user ID, pending approval, and
+a null reason. PUBLIC and anon receive no marketplace-party writes. Service-role
+access is preserved.
 
-The migration intentionally does not replace `is_admin()`,
-`current_marketplace_party_id()`, or `current_party_is_approved()`, and it does
-not revoke their existing execution grants. Once exact definitions are
-available, a follow-up must:
+## Financial view
 
-1. preserve each signature, return type, `STABLE` property, and caller-bound
-   authorization semantics;
-2. schema-qualify every referenced relation, function, operator-sensitive type,
-   and object;
-3. use an empty fixed `search_path` only after the fully qualified body is
-   proven valid;
-4. verify the bodies do not bypass intended RLS or cause recursive policy
-   evaluation;
-5. prove no anon-facing policy still calls a helper before removing anon/PUBLIC
-   EXECUTE; and
-6. grant EXECUTE only to `authenticated` and `service_role` where required.
+`public.order_financial_position` loses PUBLIC and anon SELECT, retains explicit
+SELECT for authenticated and service roles, and becomes `security_invoker`.
+Authenticated access therefore also depends on grants and RLS for
+`purchase_order`, `order_line_item`, and `payment`.
 
-Post-migration Verification Section 07 deliberately remains a failed sign-off
-until that follow-up is applied.
+## Explicit public and owner policy split
 
-## Deferred to Phase 3.2C
+The migration does not use regular-expression replacement of `pg_get_expr()` to
+generate a policy. Preflight checks exactly these audited mixed policies and the
+migration explicitly narrows only them to authenticated:
 
-The nineteen unrelated `FOR ALL` policies are not rewritten here. Their SELECT,
-INSERT, UPDATE, and DELETE semantics affect customer profiles, addresses, carts,
-orders, payments, offers, reviews, saved spaces, services, and administrative
-workflows. Each requires an operation-by-operation business review. Only the
-catalogue child operations needed for the confirmed Phase 3.2B risks receive
-new restrictive guards.
+- `custom_offering.custom_offering_select_published_or_own`
+- `product.product_select_published_or_own`
+- `product_color.product_color_select`
+- `product_image.product_image_select`
+- `product_3d_model.product_3d_model_select`
+- `product_enrichment_assignment.product_enrichment_assignment_select`
 
-FORCE RLS is also not enabled blindly. Table-owner jobs, administrative
-functions, and operational workflows must be assessed before changing owner
-bypass behavior.
+The custom-offering anonymous policy and its restrictive defense-in-depth guard
+both use this reviewed predicate:
 
-## Safe manual deployment order
+```sql
+publication_state = 'published'::public.custom_offering_state
+```
 
-1. Take a Supabase-managed backup or point-in-time recovery checkpoint. Also
-   export a schema-only snapshot containing grants, policies, views, functions,
-   triggers, and default privileges. Verify restoration in a non-production
-   environment.
-2. Run Phase 3.2A Sections 01, 03, 04, 06, 07, 08, 09, and 12 one section at a
-   time. Retain the unmodified metadata result grids.
-3. Resolve both blockers above. Have a second reviewer compare the 34 explicit
-   names with Section 01 and review the exact helper-body follow-up.
-4. Run the completed migration first in a staging database with the same schema.
-   Any preflight exception is a hard stop; investigate rather than bypass it.
-5. Run every numbered statement in
-   `phase-3.2b-security-hardening-verify.sql` separately. Sections 08, 09, and 10
-   must be empty. Every returned `check_passed` must be true. Section 05 must
-   return all nine named read guards and Section 06 all twelve write guards.
-6. Exercise anonymous catalogue reads, an authenticated seller's own drafts,
-   admin access, marketplace-party creation, and affected seller write workflows
-   in staging. Attempting to provide protected approval fields must fail.
-7. Apply the independently reviewed transaction in production during a monitored
-   window, then repeat all verification statements.
-8. Run the application regression suite and:
+No anonymous policy calls `is_admin()`, `current_marketplace_party_id()`, or
+`current_party_is_approved()`. A schema-wide check aborts before helper EXECUTE
+is revoked if any PUBLIC- or anon-facing policy still calls one.
+
+Public products require published lifecycle state, an approved seller, and an
+active category. Product child reads follow the parent product without making a
+product policy query its children, avoiding product/child RLS recursion. Public
+enrichment assignments additionally require `party_confirmed`.
+
+Authenticated sellers retain owner read policies for their own drafts and
+unconfirmed assignments. Existing read-side admin behavior is preserved.
+
+## Child-write semantics
+
+Each INSERT, UPDATE, and DELETE path on product colors, images, 3D models, and
+enrichment assignments receives a restrictive approved-owner guard. The guard
+requires both `current_party_is_approved()` and ownership through
+`current_marketplace_party_id()`.
+
+A restrictive policy does not grant access; it only limits rows admitted by an
+applicable permissive policy. The preflight and verification therefore confirm
+that a separate permissive authenticated seller-write policy remains available
+for every guarded operation.
+
+The guards do not contain `OR is_admin()` and do not claim to grant admin write
+access. Phase 3.2B preserves the audited behavior: approved owning sellers can
+write when their existing permissive policy allows it, and `service_role`
+continues to bypass RLS. New admin write authorization requires a separately
+confirmed business requirement and is not introduced here.
+
+## Helper functions
+
+The migration preserves the three exact caller-bound behaviors while changing
+their bodies to use an empty search path and fully qualified references:
+
+- `public.is_admin()`
+- `public.current_marketplace_party_id()`
+- `public.current_party_is_approved()`
+
+Names, zero-argument signatures, return types, postgres owner, `LANGUAGE sql`,
+`STABLE`, and `SECURITY DEFINER` remain unchanged. The approved comparison uses
+`'approved'::public.party_approval_state`. EXECUTE is revoked from PUBLIC and
+anon and granted explicitly to authenticated and service roles.
+
+## Default privileges and managed-role separation
+
+The core migration changes only confirmed postgres-owned scopes:
+
+- Table and sequence defaults are revoked from PUBLIC, anon, and authenticated
+  only `IN SCHEMA public`.
+- Function EXECUTE defaults are revoked globally for PUBLIC, anon, and
+  authenticated. PostgreSQL grants PUBLIC function EXECUTE implicitly at the
+  global level; a schema-local default revoke cannot subtract that global grant.
+- Service-role defaults are not changed.
+
+The internal `supabase_admin` defaults are **not fixed by the core migration**.
+They are intentionally separated so a lack of managed-role authority cannot
+block the critical existing-object fixes.
+
+Run the read-only managed-role diagnostic and have a reviewer confirm every
+namespace, object type, grantee, privilege, and authority result. The optional
+migration only accepts public-schema table/sequence defaults and global function
+defaults. It aborts on any other client-facing scope. It must pass in staging
+under the intended deployment role before separate production consideration.
+Do not weaken its preflight or combine it with the core migration.
+
+This follows PostgreSQL default-privilege semantics and Supabase's function
+guidance:
+
+- [PostgreSQL `ALTER DEFAULT PRIVILEGES`](https://www.postgresql.org/docs/current/sql-alterdefaultprivileges.html)
+- [PostgreSQL privileges](https://www.postgresql.org/docs/current/ddl-priv.html)
+- [Supabase database functions](https://supabase.com/docs/guides/database/functions)
+- [Supabase API security](https://supabase.com/docs/guides/api/securing-your-api)
+
+## Verification
+
+Run `sql/phase-3.2b-security-hardening-verify.sql` one numbered SELECT at a time.
+It reads metadata only.
+
+1. Exact public-table RLS state.
+2. Complete marketplace-party table/column INSERT and UPDATE matrix for anon,
+   authenticated, and service roles.
+3. Exactly one hardened marketplace-party INSERT policy.
+4. Financial-view presence, owner, security mode, and exact SELECT grants.
+5. Thirty expected original, public, owner, and restrictive read policies.
+6. Twelve restrictive child-write guards plus their independent permissive
+   seller-write paths.
+7. Three hardened helper functions and effective EXECUTE grants.
+8. No anonymous policy dependency on restricted helpers.
+9. No dangerous PUBLIC, anon, or authenticated existing-object grants.
+10. Exact 34-table inventory and 12-table anon SELECT classification.
+11. Three exact postgres-owned default-ACL scopes changed by the core migration.
+12. Every reviewed RLS table still has at least one policy.
+13. One summary row per verification section with expected, actual, failed, and
+    pass counts.
+
+Sections 3 through 6 start from explicit `VALUES` expectations and `LEFT JOIN`
+actual metadata. A missing expected policy or view therefore remains visible as
+`object_present = false`, `check_passed = false`, and a specific finding code.
+The final summary is safe only when every row has `failed_count = 0` and
+`check_passed = true`.
+
+## Safe manual review and deployment order
+
+1. Take and validate a restorable backup or Supabase point-in-time recovery
+   position. Record recovery instructions outside this repository.
+2. Run the helper diagnostic and managed-role default diagnostic one section at
+   a time. They return metadata only.
+3. Have a second reviewer compare the exact inventory, grants, policy names,
+   predicates, helper bodies, view ACL, default scopes, and timeout settings with
+   the live audit evidence.
+4. In an isolated staging clone, restore-test the backup before changing SQL.
+5. Run the core migration manually in staging using the intended deployment
+   role. A preflight error or timeout means the entire transaction rolls back.
+6. Run all 13 verification sections. Require all summary rows to pass.
+7. Test anonymous catalogue reads, seller drafts, seller writes, service-role
+   workflows, and financial-view access. Run:
 
    ```powershell
    uv run python -u -m scripts.live_catalog_smoke
    ```
 
-   The live smoke output must remain sanitized and the Phase 3.1 catalogue list,
-   eligibility, detail, and safe-not-found checks must pass.
+8. Review the managed-role diagnostic separately. Only if its exact output and
+   deployment authority match the optional migration should that migration be
+   tested as a distinct staging change.
+9. Obtain explicit approval before either production deployment. Monitor locks
+   and API errors, rerun verification, and retain the recovery position.
 
-There is no automatic rollback file. Restoring the broad prior grants or the
-owner-rights financial view would deliberately recreate confirmed
-vulnerabilities. If an operational rollback is required, design a narrow,
-time-bounded response from the schema-only backup and incident evidence.
+## Deferred to Phase 3.2C
 
-## Verification interpretation
+- Operation-by-operation review of the remaining nineteen `FOR ALL` policies.
+- FORCE RLS, pending owner-job and administrative workflow validation.
+- New administrator write permissions for catalogue children.
+- Any managed-role default scope not exactly accepted by the separate optional
+  preflight.
 
-The post-migration file contains metadata only:
-
-1. all public base tables retain RLS;
-2. marketplace-party column privileges match the insert/update boundary;
-3. seller INSERT policy contains all three checks;
-4. the financial view is invoker-rights and not anonymous;
-5. all required catalogue read guards exist;
-6. all twelve child write guards require approval and ownership/admin;
-7. helper security and grants reach the hardened target after the follow-up;
-8. dangerous existing client privileges are gone;
-9. unsafe client default privileges are gone; and
-10. no RLS-enabled table lost all policies.
-
-The policy checks expose full metadata expressions for human review. Regular
-expressions are regression aids, not a proof of semantic security.
-
-This design follows PostgreSQL's documented policy composition, where
-permissive policies combine with `OR` and restrictive policies combine with
-`AND`, and its documented `security_invoker` view behavior. The relevant
-references are the PostgreSQL documentation for
-[CREATE POLICY](https://www.postgresql.org/docs/current/sql-createpolicy.html),
-[CREATE VIEW](https://www.postgresql.org/docs/current/sql-createview.html), and
-[ALTER DEFAULT PRIVILEGES](https://www.postgresql.org/docs/current/sql-alterdefaultprivileges.html).
+No application data, schema migration, seed data, authentication behavior,
+FastAPI contract, or README is changed by this review package.
