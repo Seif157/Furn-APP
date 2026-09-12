@@ -294,83 +294,20 @@ roles AS (
             WHERE rolname = 'service_role'
         ) AS service_role_oid
 ),
-exact_mixed(table_name, policy_name, expected_using_expression) AS (
+mixed_metadata(
+    table_name,
+    policy_name,
+    state_column,
+    state_type,
+    is_product_child
+) AS (
     VALUES
-        (
-            'custom_offering'::name,
-            'custom_offering_select_published_or_own'::name,
-            $predicate$(publication_state = 'published'::public.custom_offering_state)
-                OR (marketplace_party_id = public.current_marketplace_party_id())
-                OR public.is_admin()$predicate$::text
-        ),
-        (
-            'product'::name,
-            'product_select_published_or_own'::name,
-            $predicate$(lifecycle_state = 'published'::public.product_lifecycle_state)
-                OR (marketplace_party_id = public.current_marketplace_party_id())
-                OR public.is_admin()$predicate$::text
-        ),
-        (
-            'product_color'::name,
-            'product_color_select'::name,
-            $predicate$EXISTS (
-                SELECT 1 FROM public.product AS parent_product
-                WHERE parent_product.id = product_color.product_id
-                  AND (
-                      parent_product.lifecycle_state =
-                          'published'::public.product_lifecycle_state
-                      OR parent_product.marketplace_party_id =
-                          public.current_marketplace_party_id()
-                      OR public.is_admin()
-                  )
-            )$predicate$::text
-        ),
-        (
-            'product_image'::name,
-            'product_image_select'::name,
-            $predicate$EXISTS (
-                SELECT 1 FROM public.product AS parent_product
-                WHERE parent_product.id = product_image.product_id
-                  AND (
-                      parent_product.lifecycle_state =
-                          'published'::public.product_lifecycle_state
-                      OR parent_product.marketplace_party_id =
-                          public.current_marketplace_party_id()
-                      OR public.is_admin()
-                  )
-            )$predicate$::text
-        ),
-        (
-            'product_3d_model'::name,
-            'product_3d_model_select'::name,
-            $predicate$EXISTS (
-                SELECT 1 FROM public.product AS parent_product
-                WHERE parent_product.id = product_3d_model.product_id
-                  AND (
-                      parent_product.lifecycle_state =
-                          'published'::public.product_lifecycle_state
-                      OR parent_product.marketplace_party_id =
-                          public.current_marketplace_party_id()
-                      OR public.is_admin()
-                  )
-            )$predicate$::text
-        ),
-        (
-            'product_enrichment_assignment'::name,
-            'product_enrichment_assignment_select'::name,
-            $predicate$EXISTS (
-                SELECT 1 FROM public.product AS parent_product
-                WHERE parent_product.id =
-                    product_enrichment_assignment.product_id
-                  AND (
-                      parent_product.lifecycle_state =
-                          'published'::public.product_lifecycle_state
-                      OR parent_product.marketplace_party_id =
-                          public.current_marketplace_party_id()
-                      OR public.is_admin()
-                  )
-            )$predicate$::text
-        )
+        ('custom_offering'::name, 'custom_offering_select_published_or_own'::name, 'publication_state'::text, 'public.custom_offering_state'::text, false),
+        ('product'::name, 'product_select_published_or_own'::name, 'lifecycle_state'::text, 'public.product_state'::text, false),
+        ('product_color'::name, 'product_color_select'::name, 'lifecycle_state'::text, 'public.product_state'::text, true),
+        ('product_image'::name, 'product_image_select'::name, 'lifecycle_state'::text, 'public.product_state'::text, true),
+        ('product_3d_model'::name, 'product_3d_model_select'::name, 'lifecycle_state'::text, 'public.product_state'::text, true),
+        ('product_enrichment_assignment'::name, 'product_enrichment_assignment_select'::name, 'lifecycle_state'::text, 'public.product_state'::text, true)
 ),
 comparison AS (
     SELECT
@@ -498,10 +435,10 @@ WITH expected_policies(
     VALUES
         ('category'::name, 'phase32b_category_anon_read_guard'::name, 'anon'::text, 'SELECT'::text, 'RESTRICTIVE'::text, 'active'::text),
         ('category'::name, 'phase32b_category_authenticated_read_guard'::name, 'authenticated'::text, 'SELECT'::text, 'RESTRICTIVE'::text, 'active_admin'::text),
-        ('custom_offering'::name, 'custom_offering_select_published_or_own'::name, 'authenticated'::text, 'SELECT'::text, 'PERMISSIVE'::text, 'custom_mixed'::text),
+        ('custom_offering'::name, 'custom_offering_select_published_or_own'::name, 'authenticated'::text, 'SELECT'::text, 'PERMISSIVE'::text, 'root_mixed'::text),
         ('custom_offering'::name, 'phase32b_custom_offering_anon_read'::name, 'anon'::text, 'SELECT'::text, 'PERMISSIVE'::text, 'custom_public'::text),
         ('custom_offering'::name, 'phase32b_custom_offering_anon_read_guard'::name, 'anon'::text, 'SELECT'::text, 'RESTRICTIVE'::text, 'custom_public'::text),
-        ('product'::name, 'product_select_published_or_own'::name, 'authenticated'::text, 'SELECT'::text, 'PERMISSIVE'::text, 'mixed_owner'::text),
+        ('product'::name, 'product_select_published_or_own'::name, 'authenticated'::text, 'SELECT'::text, 'PERMISSIVE'::text, 'root_mixed'::text),
         ('product'::name, 'phase32b_product_owner_read'::name, 'authenticated'::text, 'SELECT'::text, 'PERMISSIVE'::text, 'owner'::text),
         ('product'::name, 'phase32b_product_anon_read'::name, 'anon'::text, 'SELECT'::text, 'PERMISSIVE'::text, 'product_public'::text),
         ('product'::name, 'phase32b_product_anon_read_guard'::name, 'anon'::text, 'SELECT'::text, 'RESTRICTIVE'::text, 'product_public'::text),
@@ -527,83 +464,20 @@ WITH expected_policies(
         ('product_enrichment_assignment'::name, 'phase32b_enrichment_anon_read_guard'::name, 'anon'::text, 'SELECT'::text, 'RESTRICTIVE'::text, 'enrichment_public'::text),
         ('product_enrichment_assignment'::name, 'phase32b_enrichment_authenticated_read_guard'::name, 'authenticated'::text, 'SELECT'::text, 'RESTRICTIVE'::text, 'enrichment_authenticated'::text)
 ),
-exact_mixed(table_name, policy_name, expected_using_expression) AS (
+mixed_metadata(
+    table_name,
+    policy_name,
+    state_column,
+    state_type,
+    is_product_child
+) AS (
     VALUES
-        (
-            'custom_offering'::name,
-            'custom_offering_select_published_or_own'::name,
-            $predicate$(publication_state = 'published'::public.custom_offering_state)
-                OR (marketplace_party_id = public.current_marketplace_party_id())
-                OR public.is_admin()$predicate$::text
-        ),
-        (
-            'product'::name,
-            'product_select_published_or_own'::name,
-            $predicate$(lifecycle_state = 'published'::public.product_lifecycle_state)
-                OR (marketplace_party_id = public.current_marketplace_party_id())
-                OR public.is_admin()$predicate$::text
-        ),
-        (
-            'product_color'::name,
-            'product_color_select'::name,
-            $predicate$EXISTS (
-                SELECT 1 FROM public.product AS parent_product
-                WHERE parent_product.id = product_color.product_id
-                  AND (
-                      parent_product.lifecycle_state =
-                          'published'::public.product_lifecycle_state
-                      OR parent_product.marketplace_party_id =
-                          public.current_marketplace_party_id()
-                      OR public.is_admin()
-                  )
-            )$predicate$::text
-        ),
-        (
-            'product_image'::name,
-            'product_image_select'::name,
-            $predicate$EXISTS (
-                SELECT 1 FROM public.product AS parent_product
-                WHERE parent_product.id = product_image.product_id
-                  AND (
-                      parent_product.lifecycle_state =
-                          'published'::public.product_lifecycle_state
-                      OR parent_product.marketplace_party_id =
-                          public.current_marketplace_party_id()
-                      OR public.is_admin()
-                  )
-            )$predicate$::text
-        ),
-        (
-            'product_3d_model'::name,
-            'product_3d_model_select'::name,
-            $predicate$EXISTS (
-                SELECT 1 FROM public.product AS parent_product
-                WHERE parent_product.id = product_3d_model.product_id
-                  AND (
-                      parent_product.lifecycle_state =
-                          'published'::public.product_lifecycle_state
-                      OR parent_product.marketplace_party_id =
-                          public.current_marketplace_party_id()
-                      OR public.is_admin()
-                  )
-            )$predicate$::text
-        ),
-        (
-            'product_enrichment_assignment'::name,
-            'product_enrichment_assignment_select'::name,
-            $predicate$EXISTS (
-                SELECT 1 FROM public.product AS parent_product
-                WHERE parent_product.id =
-                    product_enrichment_assignment.product_id
-                  AND (
-                      parent_product.lifecycle_state =
-                          'published'::public.product_lifecycle_state
-                      OR parent_product.marketplace_party_id =
-                          public.current_marketplace_party_id()
-                      OR public.is_admin()
-                  )
-            )$predicate$::text
-        )
+        ('custom_offering'::name, 'custom_offering_select_published_or_own'::name, 'publication_state'::text, 'public.custom_offering_state'::text, false),
+        ('product'::name, 'product_select_published_or_own'::name, 'lifecycle_state'::text, 'public.product_state'::text, false),
+        ('product_color'::name, 'product_color_select'::name, 'lifecycle_state'::text, 'public.product_state'::text, true),
+        ('product_image'::name, 'product_image_select'::name, 'lifecycle_state'::text, 'public.product_state'::text, true),
+        ('product_3d_model'::name, 'product_3d_model_select'::name, 'lifecycle_state'::text, 'public.product_state'::text, true),
+        ('product_enrichment_assignment'::name, 'product_enrichment_assignment_select'::name, 'lifecycle_state'::text, 'public.product_state'::text, true)
 ),
 comparison AS (
     SELECT
@@ -620,37 +494,75 @@ comparison AS (
             WHEN 'active_admin' THEN
                 actual.qual ~* 'is_active.*true'
                 AND actual.qual ~* 'is_admin'
-            WHEN 'custom_mixed' THEN
-                pg_catalog.regexp_replace(
+            WHEN 'root_mixed' THEN
+                actual.with_check IS NULL
+                AND position(mixed.state_column IN lower(actual.qual)) > 0
+                AND position('published' IN lower(actual.qual)) > 0
+                AND position('marketplace_party_id' IN lower(actual.qual)) > 0
+                AND position('current_marketplace_party_id' IN lower(actual.qual)) > 0
+                AND lower(actual.qual) !~ 'is_admin'
+                AND lower(actual.qual) !~
+                    '(^|[^[:alnum:]_])or[[:space:]]*[(]*[[:space:]]*true([^[:alnum:]_]|$)'
+                AND lower(actual.qual) !~
+                    '(^|[^[:alnum:]_])true[[:space:]]*[)]*[[:space:]]*or([^[:alnum:]_]|$)'
+                AND pg_catalog.regexp_count(
                     lower(actual.qual),
-                    '[[:space:]]',
-                    '',
-                    'g'
-                ) = pg_catalog.regexp_replace(
-                    lower(exact.expected_using_expression),
-                    '[[:space:]]',
-                    '',
-                    'g'
+                    '(^|[^[:alnum:]_])or([^[:alnum:]_]|$)'
+                ) = 1
+                AND EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_depend AS dependency
+                    WHERE dependency.classid = 'pg_catalog.pg_policy'::regclass
+                      AND dependency.objid = policy_catalog.oid
+                      AND dependency.refclassid = 'pg_catalog.pg_proc'::regclass
+                      AND dependency.refobjid =
+                          'public.current_marketplace_party_id()'::regprocedure
                 )
+                AND position(
+                    split_part(mixed.state_type, '.', 2) IN lower(actual.qual)
+                ) > 0
             WHEN 'custom_public' THEN
                 actual.qual ~* 'publication_state.*published'
                 AND actual.qual ~* 'custom_offering_state'
                 AND lower(actual.qual) !~
                     'current_marketplace_party_id|current_party_is_approved|is_admin'
             WHEN 'mixed_owner' THEN
-                pg_catalog.regexp_replace(
+                actual.with_check IS NULL
+                AND position(mixed.state_column IN lower(actual.qual)) > 0
+                AND position('published' IN lower(actual.qual)) > 0
+                AND position('product_id' IN lower(actual.qual)) > 0
+                AND position('marketplace_party_id' IN lower(actual.qual)) > 0
+                AND position('current_marketplace_party_id' IN lower(actual.qual)) > 0
+                AND lower(actual.qual) !~ 'is_admin'
+                AND lower(actual.qual) !~
+                    '(^|[^[:alnum:]_])or[[:space:]]*[(]*[[:space:]]*true([^[:alnum:]_]|$)'
+                AND lower(actual.qual) !~
+                    '(^|[^[:alnum:]_])true[[:space:]]*[)]*[[:space:]]*or([^[:alnum:]_]|$)'
+                AND pg_catalog.regexp_count(
                     lower(actual.qual),
-                    '[[:space:]]',
-                    '',
-                    'g'
-                ) = pg_catalog.regexp_replace(
-                    lower(exact.expected_using_expression),
-                    '[[:space:]]',
-                    '',
-                    'g'
+                    '(^|[^[:alnum:]_])or([^[:alnum:]_]|$)'
+                ) = 1
+                AND mixed.is_product_child
+                AND EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_depend AS dependency
+                    WHERE dependency.classid = 'pg_catalog.pg_policy'::regclass
+                      AND dependency.objid = policy_catalog.oid
+                      AND dependency.refclassid = 'pg_catalog.pg_proc'::regclass
+                      AND dependency.refobjid =
+                          'public.current_marketplace_party_id()'::regprocedure
+                )
+                AND position(
+                    split_part(mixed.state_type, '.', 2) IN lower(actual.qual)
+                ) > 0
+                AND EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_depend AS dependency
+                    WHERE dependency.classid = 'pg_catalog.pg_policy'::regclass
+                      AND dependency.objid = policy_catalog.oid
+                      AND dependency.refclassid = 'pg_catalog.pg_class'::regclass
+                      AND dependency.refobjid = 'public.product'::regclass
                 )
             WHEN 'owner' THEN
-                lower(actual.qual) ~ 'current_marketplace_party_id|is_admin'
+                lower(actual.qual) ~ 'current_marketplace_party_id'
+                AND lower(actual.qual) !~ 'is_admin'
             WHEN 'product_public' THEN
                 actual.qual ~* 'lifecycle_state.*published'
                 AND actual.qual ~* 'approval_state.*approved'
@@ -671,7 +583,8 @@ comparison AS (
                     'current_marketplace_party_id|current_party_is_approved|is_admin'
             WHEN 'enrichment_authenticated' THEN
                 actual.qual ~* 'confirmation_state.*party_confirmed'
-                AND lower(actual.qual) ~ 'current_marketplace_party_id|is_admin'
+                AND lower(actual.qual) ~ 'current_marketplace_party_id'
+                AND lower(actual.qual) !~ 'is_admin'
             ELSE false
         END AS predicate_check_passed
     FROM expected_policies AS expected
@@ -679,9 +592,15 @@ comparison AS (
         ON actual.schemaname = 'public'
        AND actual.tablename = expected.table_name
        AND actual.policyname = expected.policy_name
-    LEFT JOIN exact_mixed AS exact
-        ON exact.table_name = expected.table_name
-       AND exact.policy_name = expected.policy_name
+    LEFT JOIN mixed_metadata AS mixed
+        ON mixed.table_name = expected.table_name
+       AND mixed.policy_name = expected.policy_name
+    LEFT JOIN pg_catalog.pg_class AS policy_relation
+        ON policy_relation.relnamespace = 'public'::regnamespace
+       AND policy_relation.relname = expected.table_name
+    LEFT JOIN pg_catalog.pg_policy AS policy_catalog
+        ON policy_catalog.polrelid = policy_relation.oid
+       AND policy_catalog.polname = expected.policy_name
 )
 SELECT
     actual_policy_name IS NOT NULL AS object_present,
@@ -1021,8 +940,9 @@ SELECT
 FROM violations;
 
 
--- 09. Dangerous existing grants. A safe result is empty.
-WITH expected_roles(role_name) AS (
+-- 09. Dangerous existing grants. A safe result is empty. MAINTAIN is read
+-- from ACL metadata instead of being passed to a privilege parser on PG15/16.
+WITH RECURSIVE expected_roles(role_name) AS (
     VALUES ('PUBLIC'::name), ('anon'::name), ('authenticated'::name)
 ),
 target_roles AS (
@@ -1032,6 +952,19 @@ target_roles AS (
         ON role_row.rolname = expected.role_name
        AND expected.role_name <> 'PUBLIC'
 ),
+role_closure(role_name, role_oid) AS (
+    SELECT target.rolname, target.oid
+    FROM target_roles AS target
+    WHERE target.rolname <> 'PUBLIC'
+    UNION
+    SELECT closure.role_name, membership.roleid
+    FROM role_closure AS closure
+    JOIN pg_catalog.pg_roles AS member_role
+        ON member_role.oid = closure.role_oid
+       AND member_role.rolinherit
+    JOIN pg_catalog.pg_auth_members AS membership
+        ON membership.member = closure.role_oid
+),
 dangerous_privileges(role_name, privilege_name) AS (
     VALUES
         ('PUBLIC'::name, 'INSERT'::text),
@@ -1040,18 +973,15 @@ dangerous_privileges(role_name, privilege_name) AS (
         ('PUBLIC'::name, 'TRUNCATE'::text),
         ('PUBLIC'::name, 'REFERENCES'::text),
         ('PUBLIC'::name, 'TRIGGER'::text),
-        ('PUBLIC'::name, 'MAINTAIN'::text),
         ('anon'::name, 'INSERT'::text),
         ('anon'::name, 'UPDATE'::text),
         ('anon'::name, 'DELETE'::text),
         ('anon'::name, 'TRUNCATE'::text),
         ('anon'::name, 'REFERENCES'::text),
         ('anon'::name, 'TRIGGER'::text),
-        ('anon'::name, 'MAINTAIN'::text),
         ('authenticated'::name, 'TRUNCATE'::text),
         ('authenticated'::name, 'REFERENCES'::text),
-        ('authenticated'::name, 'TRIGGER'::text),
-        ('authenticated'::name, 'MAINTAIN'::text)
+        ('authenticated'::name, 'TRIGGER'::text)
 ),
 public_tables AS (
     SELECT relation.oid, relation.relname, relation.relacl, relation.relowner
@@ -1071,9 +1001,6 @@ CROSS JOIN target_roles AS role_row
 JOIN dangerous_privileges AS privilege
     ON privilege.role_name = role_row.rolname
 WHERE CASE
-    WHEN privilege.privilege_name = 'MAINTAIN'
-     AND current_setting('server_version_num')::integer < 170000
-    THEN false
     WHEN role_row.rolname = 'PUBLIC'
     THEN EXISTS (
         SELECT 1
@@ -1095,7 +1022,37 @@ WHERE CASE
         privilege.privilege_name
     )
 END
-ORDER BY table_row.relname, role_row.rolname, privilege.privilege_name;
+UNION ALL
+SELECT
+    table_row.relname AS table_name,
+    role_row.rolname AS role_name,
+    'MAINTAIN'::text AS privilege_name,
+    false AS check_passed
+FROM public_tables AS table_row
+CROSS JOIN target_roles AS role_row
+CROSS JOIN LATERAL pg_catalog.aclexplode(
+    COALESCE(
+        table_row.relacl,
+        pg_catalog.acldefault(
+            'r'::pg_catalog."char",
+            table_row.relowner
+        )
+    )
+) AS acl
+WHERE acl.privilege_type = 'MAINTAIN'
+  AND (
+      acl.grantee = 0
+      OR (
+          role_row.rolname <> 'PUBLIC'
+          AND EXISTS (
+              SELECT 1
+              FROM role_closure AS closure
+              WHERE closure.role_name = role_row.rolname
+                AND closure.role_oid = acl.grantee
+          )
+      )
+  )
+ORDER BY table_name, role_name, privilege_name;
 
 
 -- 10. Exact inventory and anonymous SELECT allowlist. All 34 rows must pass.
@@ -1208,15 +1165,16 @@ WITH expected_scopes(
     scope_name,
     schema_name,
     object_type,
-    object_type_code,
+    catalog_object_type_code,
+    acldefault_object_type_code,
     expected_role,
     expected_command
 ) AS (
     VALUES
-        ('public_tables'::text, 'public'::name, 'table'::text, 'r'::pg_catalog."char", 'PUBLIC, anon, authenticated'::text, 'NO EFFECTIVE CLIENT DEFAULT PRIVILEGES'::text),
-        ('public_sequences'::text, 'public'::name, 'sequence'::text, 'S'::pg_catalog."char", 'PUBLIC, anon, authenticated'::text, 'NO EFFECTIVE CLIENT DEFAULT PRIVILEGES'::text),
-        ('public_functions'::text, 'public'::name, 'function'::text, 'f'::pg_catalog."char", 'PUBLIC, anon, authenticated'::text, 'NO EFFECTIVE CLIENT DEFAULT EXECUTE'::text),
-        ('global_functions'::text, NULL::name, 'function'::text, 'f'::pg_catalog."char", 'PUBLIC, anon, authenticated'::text, 'NO EFFECTIVE CLIENT DEFAULT EXECUTE'::text)
+        ('public_tables'::text, 'public'::name, 'table'::text, 'r'::pg_catalog."char", 'r'::pg_catalog."char", 'PUBLIC, anon, authenticated'::text, 'NO EFFECTIVE CLIENT DEFAULT PRIVILEGES'::text),
+        ('public_sequences'::text, 'public'::name, 'sequence'::text, 'S'::pg_catalog."char", 's'::pg_catalog."char", 'PUBLIC, anon, authenticated'::text, 'NO EFFECTIVE CLIENT DEFAULT PRIVILEGES'::text),
+        ('public_functions'::text, 'public'::name, 'function'::text, 'f'::pg_catalog."char", 'f'::pg_catalog."char", 'PUBLIC, anon, authenticated'::text, 'NO EFFECTIVE CLIENT DEFAULT EXECUTE'::text),
+        ('global_functions'::text, NULL::name, 'function'::text, 'f'::pg_catalog."char", 'f'::pg_catalog."char", 'PUBLIC, anon, authenticated'::text, 'NO EFFECTIVE CLIENT DEFAULT EXECUTE'::text)
 ),
 owner_role AS (
     SELECT oid, rolname FROM pg_catalog.pg_roles WHERE rolname = 'postgres'
@@ -1240,7 +1198,10 @@ comparison AS (
             FROM pg_catalog.aclexplode(
                 COALESCE(
                     global_defaults.defaclacl,
-                    pg_catalog.acldefault(expected.object_type_code, owner.oid)
+                    pg_catalog.acldefault(
+                        expected.acldefault_object_type_code,
+                        owner.oid
+                    )
                 ) || CASE
                     WHEN expected.schema_name IS NULL
                     THEN ARRAY[]::aclitem[]
@@ -1254,7 +1215,7 @@ comparison AS (
             WHERE COALESCE(grantee.rolname, 'PUBLIC')
                 IN ('PUBLIC', 'anon', 'authenticated')
               AND (
-                  expected.object_type_code IN (
+                   expected.catalog_object_type_code IN (
                       'r'::pg_catalog."char",
                       'S'::pg_catalog."char"
                   )
@@ -1267,11 +1228,11 @@ comparison AS (
         ON namespace.nspname = expected.schema_name
     LEFT JOIN pg_catalog.pg_default_acl AS global_defaults
         ON global_defaults.defaclrole = owner.oid
-       AND global_defaults.defaclobjtype = expected.object_type_code
+       AND global_defaults.defaclobjtype = expected.catalog_object_type_code
        AND global_defaults.defaclnamespace = 0
     LEFT JOIN pg_catalog.pg_default_acl AS schema_defaults
         ON schema_defaults.defaclrole = owner.oid
-       AND schema_defaults.defaclobjtype = expected.object_type_code
+       AND schema_defaults.defaclobjtype = expected.catalog_object_type_code
        AND schema_defaults.defaclnamespace = namespace.oid
        AND expected.schema_name IS NOT NULL
 )
@@ -1364,7 +1325,7 @@ ORDER BY table_name;
 
 -- 13. Final verification summary. One row is returned for every numbered
 -- section above, including sections whose detailed query reports no violations.
-WITH expected_tables(table_name, anon_select_expected) AS (
+WITH RECURSIVE expected_tables(table_name, anon_select_expected) AS (
     VALUES
         ('address'::name, false), ('admin_user'::name, false),
         ('cart'::name, false), ('cart_line'::name, false),
@@ -1406,6 +1367,24 @@ resolved_roles AS (
             AS authenticated_oid,
         (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = 'service_role')
             AS service_role_oid
+),
+summary_role_closure(role_name, role_oid) AS (
+    SELECT seed.role_name, seed.role_oid
+    FROM (
+        SELECT 'anon'::name AS role_name, roles.anon_oid AS role_oid
+        FROM resolved_roles AS roles
+        UNION ALL
+        SELECT 'authenticated'::name, roles.authenticated_oid
+        FROM resolved_roles AS roles
+    ) AS seed
+    UNION
+    SELECT closure.role_name, membership.roleid
+    FROM summary_role_closure AS closure
+    JOIN pg_catalog.pg_roles AS member_role
+        ON member_role.oid = closure.role_oid
+       AND member_role.rolinherit
+    JOIN pg_catalog.pg_auth_members AS membership
+        ON membership.member = closure.role_oid
 ),
 section_01_checks AS (
     SELECT
@@ -1556,10 +1535,10 @@ read_expected(table_name, policy_name, role_name, policy_mode, predicate_kind) A
     VALUES
         ('category'::name, 'phase32b_category_anon_read_guard'::name, 'anon'::text, 'RESTRICTIVE'::text, 'active'::text),
         ('category'::name, 'phase32b_category_authenticated_read_guard'::name, 'authenticated'::text, 'RESTRICTIVE'::text, 'active_admin'::text),
-        ('custom_offering'::name, 'custom_offering_select_published_or_own'::name, 'authenticated'::text, 'PERMISSIVE'::text, 'custom_mixed'::text),
+        ('custom_offering'::name, 'custom_offering_select_published_or_own'::name, 'authenticated'::text, 'PERMISSIVE'::text, 'root_mixed'::text),
         ('custom_offering'::name, 'phase32b_custom_offering_anon_read'::name, 'anon'::text, 'PERMISSIVE'::text, 'custom_public'::text),
         ('custom_offering'::name, 'phase32b_custom_offering_anon_read_guard'::name, 'anon'::text, 'RESTRICTIVE'::text, 'custom_public'::text),
-        ('product'::name, 'product_select_published_or_own'::name, 'authenticated'::text, 'PERMISSIVE'::text, 'mixed_owner'::text),
+        ('product'::name, 'product_select_published_or_own'::name, 'authenticated'::text, 'PERMISSIVE'::text, 'root_mixed'::text),
         ('product'::name, 'phase32b_product_owner_read'::name, 'authenticated'::text, 'PERMISSIVE'::text, 'owner'::text),
         ('product'::name, 'phase32b_product_anon_read'::name, 'anon'::text, 'PERMISSIVE'::text, 'product_public'::text),
         ('product'::name, 'phase32b_product_anon_read_guard'::name, 'anon'::text, 'RESTRICTIVE'::text, 'product_public'::text),
@@ -1585,14 +1564,20 @@ read_expected(table_name, policy_name, role_name, policy_mode, predicate_kind) A
         ('product_enrichment_assignment'::name, 'phase32b_enrichment_anon_read_guard'::name, 'anon'::text, 'RESTRICTIVE'::text, 'enrichment_public'::text),
         ('product_enrichment_assignment'::name, 'phase32b_enrichment_authenticated_read_guard'::name, 'authenticated'::text, 'RESTRICTIVE'::text, 'enrichment_authenticated'::text)
 ),
-summary_exact_mixed(table_name, policy_name, expected_using_expression) AS (
+summary_mixed_metadata(
+    table_name,
+    policy_name,
+    state_column,
+    state_type,
+    is_product_child
+) AS (
     VALUES
-        ('custom_offering'::name, 'custom_offering_select_published_or_own'::name, $predicate$(publication_state = 'published'::public.custom_offering_state) OR (marketplace_party_id = public.current_marketplace_party_id()) OR public.is_admin()$predicate$::text),
-        ('product'::name, 'product_select_published_or_own'::name, $predicate$(lifecycle_state = 'published'::public.product_lifecycle_state) OR (marketplace_party_id = public.current_marketplace_party_id()) OR public.is_admin()$predicate$::text),
-        ('product_color'::name, 'product_color_select'::name, $predicate$EXISTS (SELECT 1 FROM public.product AS parent_product WHERE parent_product.id = product_color.product_id AND (parent_product.lifecycle_state = 'published'::public.product_lifecycle_state OR parent_product.marketplace_party_id = public.current_marketplace_party_id() OR public.is_admin()))$predicate$::text),
-        ('product_image'::name, 'product_image_select'::name, $predicate$EXISTS (SELECT 1 FROM public.product AS parent_product WHERE parent_product.id = product_image.product_id AND (parent_product.lifecycle_state = 'published'::public.product_lifecycle_state OR parent_product.marketplace_party_id = public.current_marketplace_party_id() OR public.is_admin()))$predicate$::text),
-        ('product_3d_model'::name, 'product_3d_model_select'::name, $predicate$EXISTS (SELECT 1 FROM public.product AS parent_product WHERE parent_product.id = product_3d_model.product_id AND (parent_product.lifecycle_state = 'published'::public.product_lifecycle_state OR parent_product.marketplace_party_id = public.current_marketplace_party_id() OR public.is_admin()))$predicate$::text),
-        ('product_enrichment_assignment'::name, 'product_enrichment_assignment_select'::name, $predicate$EXISTS (SELECT 1 FROM public.product AS parent_product WHERE parent_product.id = product_enrichment_assignment.product_id AND (parent_product.lifecycle_state = 'published'::public.product_lifecycle_state OR parent_product.marketplace_party_id = public.current_marketplace_party_id() OR public.is_admin()))$predicate$::text)
+        ('custom_offering'::name, 'custom_offering_select_published_or_own'::name, 'publication_state'::text, 'public.custom_offering_state'::text, false),
+        ('product'::name, 'product_select_published_or_own'::name, 'lifecycle_state'::text, 'public.product_state'::text, false),
+        ('product_color'::name, 'product_color_select'::name, 'lifecycle_state'::text, 'public.product_state'::text, true),
+        ('product_image'::name, 'product_image_select'::name, 'lifecycle_state'::text, 'public.product_state'::text, true),
+        ('product_3d_model'::name, 'product_3d_model_select'::name, 'lifecycle_state'::text, 'public.product_state'::text, true),
+        ('product_enrichment_assignment'::name, 'product_enrichment_assignment_select'::name, 'lifecycle_state'::text, 'public.product_state'::text, true)
 ),
 section_05_checks AS (
     SELECT
@@ -1606,30 +1591,74 @@ section_05_checks AS (
                 AND lower(policy.qual) !~ 'is_admin|current_marketplace_party_id'
             WHEN 'active_admin' THEN policy.qual ~* 'is_active.*true'
                 AND policy.qual ~* 'is_admin'
-            WHEN 'custom_mixed' THEN
-                pg_catalog.regexp_replace(
-                    lower(policy.qual), '[[:space:]]', '', 'g'
-                ) = pg_catalog.regexp_replace(
-                    lower(exact.expected_using_expression),
-                    '[[:space:]]',
-                    '',
-                    'g'
+            WHEN 'root_mixed' THEN
+                policy.with_check IS NULL
+                AND position(mixed.state_column IN lower(policy.qual)) > 0
+                AND position('published' IN lower(policy.qual)) > 0
+                AND position('marketplace_party_id' IN lower(policy.qual)) > 0
+                AND position('current_marketplace_party_id' IN lower(policy.qual)) > 0
+                AND lower(policy.qual) !~ 'is_admin'
+                AND lower(policy.qual) !~
+                    '(^|[^[:alnum:]_])or[[:space:]]*[(]*[[:space:]]*true([^[:alnum:]_]|$)'
+                AND lower(policy.qual) !~
+                    '(^|[^[:alnum:]_])true[[:space:]]*[)]*[[:space:]]*or([^[:alnum:]_]|$)'
+                AND pg_catalog.regexp_count(
+                    lower(policy.qual),
+                    '(^|[^[:alnum:]_])or([^[:alnum:]_]|$)'
+                ) = 1
+                AND EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_depend AS dependency
+                    WHERE dependency.classid = 'pg_catalog.pg_policy'::regclass
+                      AND dependency.objid = policy_catalog.oid
+                      AND dependency.refclassid = 'pg_catalog.pg_proc'::regclass
+                      AND dependency.refobjid =
+                          'public.current_marketplace_party_id()'::regprocedure
                 )
+                AND position(
+                    split_part(mixed.state_type, '.', 2) IN lower(policy.qual)
+                ) > 0
             WHEN 'custom_public' THEN policy.qual ~* 'publication_state.*published'
                 AND policy.qual ~* 'custom_offering_state'
                 AND lower(policy.qual) !~
                     'current_marketplace_party_id|current_party_is_approved|is_admin'
             WHEN 'mixed_owner' THEN
-                pg_catalog.regexp_replace(
-                    lower(policy.qual), '[[:space:]]', '', 'g'
-                ) = pg_catalog.regexp_replace(
-                    lower(exact.expected_using_expression),
-                    '[[:space:]]',
-                    '',
-                    'g'
+                policy.with_check IS NULL
+                AND position(mixed.state_column IN lower(policy.qual)) > 0
+                AND position('published' IN lower(policy.qual)) > 0
+                AND position('product_id' IN lower(policy.qual)) > 0
+                AND position('marketplace_party_id' IN lower(policy.qual)) > 0
+                AND position('current_marketplace_party_id' IN lower(policy.qual)) > 0
+                AND lower(policy.qual) !~ 'is_admin'
+                AND lower(policy.qual) !~
+                    '(^|[^[:alnum:]_])or[[:space:]]*[(]*[[:space:]]*true([^[:alnum:]_]|$)'
+                AND lower(policy.qual) !~
+                    '(^|[^[:alnum:]_])true[[:space:]]*[)]*[[:space:]]*or([^[:alnum:]_]|$)'
+                AND pg_catalog.regexp_count(
+                    lower(policy.qual),
+                    '(^|[^[:alnum:]_])or([^[:alnum:]_]|$)'
+                ) = 1
+                AND mixed.is_product_child
+                AND EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_depend AS dependency
+                    WHERE dependency.classid = 'pg_catalog.pg_policy'::regclass
+                      AND dependency.objid = policy_catalog.oid
+                      AND dependency.refclassid = 'pg_catalog.pg_proc'::regclass
+                      AND dependency.refobjid =
+                          'public.current_marketplace_party_id()'::regprocedure
+                )
+                AND position(
+                    split_part(mixed.state_type, '.', 2) IN lower(policy.qual)
+                ) > 0
+                AND EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_depend AS dependency
+                    WHERE dependency.classid = 'pg_catalog.pg_policy'::regclass
+                      AND dependency.objid = policy_catalog.oid
+                      AND dependency.refclassid = 'pg_catalog.pg_class'::regclass
+                      AND dependency.refobjid = 'public.product'::regclass
                 )
             WHEN 'owner' THEN
-                lower(policy.qual) ~ 'current_marketplace_party_id|is_admin'
+                lower(policy.qual) ~ 'current_marketplace_party_id'
+                AND lower(policy.qual) !~ 'is_admin'
             WHEN 'product_public' THEN
                 policy.qual ~* 'lifecycle_state.*published'
                 AND policy.qual ~* 'approval_state.*approved'
@@ -1650,7 +1679,8 @@ section_05_checks AS (
                     'current_marketplace_party_id|current_party_is_approved|is_admin'
             WHEN 'enrichment_authenticated' THEN
                 policy.qual ~* 'confirmation_state.*party_confirmed'
-                AND lower(policy.qual) ~ 'current_marketplace_party_id|is_admin'
+                AND lower(policy.qual) ~ 'current_marketplace_party_id'
+                AND lower(policy.qual) !~ 'is_admin'
             ELSE false
         END AS check_passed
     FROM read_expected AS expected
@@ -1658,9 +1688,15 @@ section_05_checks AS (
         ON policy.schemaname = 'public'
        AND policy.tablename = expected.table_name
        AND policy.policyname = expected.policy_name
-    LEFT JOIN summary_exact_mixed AS exact
-        ON exact.table_name = expected.table_name
-       AND exact.policy_name = expected.policy_name
+    LEFT JOIN summary_mixed_metadata AS mixed
+        ON mixed.table_name = expected.table_name
+       AND mixed.policy_name = expected.policy_name
+    LEFT JOIN pg_catalog.pg_class AS policy_relation
+        ON policy_relation.relnamespace = 'public'::regnamespace
+       AND policy_relation.relname = expected.table_name
+    LEFT JOIN pg_catalog.pg_policy AS policy_catalog
+        ON policy_catalog.polrelid = policy_relation.oid
+       AND policy_catalog.polname = expected.policy_name
 ),
 write_expected(table_name, policy_name, command_name) AS (
     VALUES
@@ -1832,7 +1868,7 @@ section_09_checks AS (
                 WHERE acl.grantee = 0
                   AND acl.privilege_type IN (
                       'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE',
-                      'REFERENCES', 'TRIGGER', 'MAINTAIN'
+                      'REFERENCES', 'TRIGGER'
                   )
             )
             OR pg_catalog.has_table_privilege(
@@ -1845,19 +1881,27 @@ section_09_checks AS (
                 table_row.oid,
                 'TRUNCATE, REFERENCES, TRIGGER'
             )
-            OR CASE
-                WHEN current_setting('server_version_num')::integer >= 170000
-                THEN pg_catalog.has_table_privilege(
-                    roles.anon_oid,
-                    table_row.oid,
-                    'MAINTAIN'
-                ) OR pg_catalog.has_table_privilege(
-                    roles.authenticated_oid,
-                    table_row.oid,
-                    'MAINTAIN'
-                )
-                ELSE false
-            END
+            OR EXISTS (
+                SELECT 1
+                FROM pg_catalog.aclexplode(
+                    COALESCE(
+                        table_row.relacl,
+                        pg_catalog.acldefault(
+                            'r'::pg_catalog."char",
+                            table_row.relowner
+                        )
+                    )
+                ) AS acl
+                WHERE acl.privilege_type = 'MAINTAIN'
+                  AND (
+                      acl.grantee = 0
+                      OR EXISTS (
+                          SELECT 1
+                          FROM summary_role_closure AS closure
+                          WHERE closure.role_oid = acl.grantee
+                      )
+                  )
+            )
         ) AS check_passed
 ),
 section_10_checks AS (
@@ -1880,12 +1924,17 @@ section_10_checks AS (
         WHERE expected.table_name = actual.relname
     )
 ),
-default_expected(scope_name, schema_scope, object_type) AS (
-    VALUES
-        ('public_tables'::text, 'public'::name, 'r'::pg_catalog."char"),
-        ('public_sequences'::text, 'public'::name, 'S'::pg_catalog."char"),
-        ('public_functions'::text, 'public'::name, 'f'::pg_catalog."char"),
-        ('global_functions'::text, NULL::name, 'f'::pg_catalog."char")
+    default_expected(
+        scope_name,
+        schema_scope,
+        catalog_object_type,
+        acldefault_object_type
+    ) AS (
+        VALUES
+            ('public_tables'::text, 'public'::name, 'r'::pg_catalog."char", 'r'::pg_catalog."char"),
+            ('public_sequences'::text, 'public'::name, 'S'::pg_catalog."char", 's'::pg_catalog."char"),
+            ('public_functions'::text, 'public'::name, 'f'::pg_catalog."char", 'f'::pg_catalog."char"),
+            ('global_functions'::text, NULL::name, 'f'::pg_catalog."char", 'f'::pg_catalog."char")
 ),
 postgres_role AS (
     SELECT oid FROM pg_catalog.pg_roles WHERE rolname = 'postgres'
@@ -1904,7 +1953,10 @@ section_11_checks AS (
             FROM pg_catalog.aclexplode(
                 COALESCE(
                     global_defaults.defaclacl,
-                    pg_catalog.acldefault(expected.object_type, owner.oid)
+                    pg_catalog.acldefault(
+                        expected.acldefault_object_type,
+                        owner.oid
+                    )
                 ) || CASE
                     WHEN expected.schema_scope IS NULL
                     THEN ARRAY[]::aclitem[]
@@ -1918,7 +1970,7 @@ section_11_checks AS (
             WHERE COALESCE(grantee.rolname, 'PUBLIC')
                 IN ('PUBLIC', 'anon', 'authenticated')
               AND (
-                  expected.object_type IN (
+                  expected.catalog_object_type IN (
                       'r'::pg_catalog."char",
                       'S'::pg_catalog."char"
                   )
@@ -1931,11 +1983,11 @@ section_11_checks AS (
         ON namespace.nspname = expected.schema_scope
     LEFT JOIN pg_catalog.pg_default_acl AS global_defaults
         ON global_defaults.defaclrole = owner.oid
-       AND global_defaults.defaclobjtype = expected.object_type
+       AND global_defaults.defaclobjtype = expected.catalog_object_type
        AND global_defaults.defaclnamespace = 0
     LEFT JOIN pg_catalog.pg_default_acl AS schema_defaults
         ON schema_defaults.defaclrole = owner.oid
-       AND schema_defaults.defaclobjtype = expected.object_type
+       AND schema_defaults.defaclobjtype = expected.catalog_object_type
        AND schema_defaults.defaclnamespace = namespace.oid
        AND expected.schema_scope IS NOT NULL
 ),

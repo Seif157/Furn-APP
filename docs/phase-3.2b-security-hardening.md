@@ -8,6 +8,8 @@ for staging or production.
 The package contains:
 
 - `sql/phase-3.2b-security-hardening.sql`: core transactional migration.
+- `sql/phase-3.2b-security-hardening-preflight.sql`: rollback-scoped copy of the
+  core safeguards and exact preflight block, with no migration DDL or DCL.
 - `sql/phase-3.2b-security-hardening-verify.sql`: read-only post-migration
   verification, including a final section summary.
 - `sql/phase-3.2b-helper-function-definitions.sql`: read-only helper diagnostic.
@@ -46,7 +48,10 @@ semantics remain deferred to Phase 3.2C.
 The core migration performs every preflight check before its first DDL or DCL
 statement. It verifies:
 
-- PostgreSQL version and the exact required roles.
+- PostgreSQL version, the exact required roles, and the audited enum inventory.
+  The live product enum is `public.product_state`; the preflight also requires
+  `public.custom_offering_state` and `public.party_approval_state` and fails if
+  the known-absent legacy product enum name resolves.
 - Set equality for the exact 34-table inventory using bidirectional `EXCEPT`.
   Array order cannot affect the result. An exception reports exact missing and
   unexpected table names, but no application rows.
@@ -56,8 +61,11 @@ statement. It verifies:
   and UPDATE privilege shape.
 - The financial view's existence, owner-rights state, postgres owner, and exact
   pre-migration SELECT grantees.
-- The exact names, SELECT command, permissive mode, roles, and complete
-  whitespace-canonical predicates for the six mixed policies being narrowed.
+- The exact names, table identities, SELECT command, permissive mode, roles,
+  absence of `WITH CHECK`, expected relation/function dependencies, and
+  critical predicate ingredients for the six mixed policies being narrowed.
+  It rejects helper drift, an unexpected admin dependency, and Boolean
+  broadening such as `OR true`.
 - The absence of prior `phase32b_` policy artifacts.
 - A separate applicable permissive authenticated seller-write policy for every
   child write operation that receives a restrictive guard.
@@ -146,9 +154,12 @@ Authenticated access therefore also depends on grants and RLS for
 ## Explicit public and owner policy split
 
 The migration does not use regular-expression replacement of `pg_get_expr()` to
-generate a policy. Preflight compares the complete audited predicates after
-removing whitespace only. Each `ALTER POLICY` explicitly reinstalls its full
-reviewed `USING` predicate as well as narrowing it to authenticated:
+generate or validate a policy. PostgreSQL reconstructs that text and may change
+parentheses, aliases, and qualification, so whitespace-only textual equality is
+not a reliable drift check. Preflight instead verifies policy metadata,
+dependencies, critical predicate ingredients, and the absence of Boolean
+broadening. Each `ALTER POLICY` still explicitly reinstalls its complete
+reviewed `USING` predicate while narrowing it to authenticated:
 
 - `custom_offering.custom_offering_select_published_or_own`
 - `product.product_select_published_or_own`
@@ -174,7 +185,12 @@ product policy query its children, avoiding product/child RLS recursion. Public
 enrichment assignments additionally require `party_confirmed`.
 
 Authenticated sellers retain owner read policies for their own drafts and
-unconfirmed assignments. Existing read-side admin behavior is preserved.
+unconfirmed assignments. The six retained mixed policies and the four new child
+owner-read permissive policies contain no `is_admin()` branch. Existing
+`product_select_admin` and `custom_offering_select_admin` policies continue to
+provide the audited parent-level administrator reads; Phase 3.2B does not add
+administrator reads for draft product colors, images, 3D models, or enrichment
+assignments.
 
 ## Child-write semantics
 
@@ -239,6 +255,12 @@ function revokes and has its own transactional postflight. It must pass a new
 human review and live preflight confirmation before staging consideration. Do
 not weaken its preflight or combine it with the core migration.
 
+Effective default-ACL calculations deliberately use PostgreSQL's two different
+sequence codes: uppercase `S` for `pg_default_acl.defaclobjtype`, and lowercase
+`s` as the object-type argument to `pg_catalog.acldefault()`. The core
+postflight, Section 11 and its summary, the managed-role diagnostic, and the
+optional postflight all keep those values in separate fields.
+
 This follows PostgreSQL default-privilege semantics and Supabase's function
 guidance:
 
@@ -277,14 +299,21 @@ actual metadata. A missing expected policy or view therefore remains visible as
 The final summary expects four Section 11 results and is safe only when every row
 has `failed_count = 0` and `check_passed = true`.
 
+`MAINTAIN` exists only on PostgreSQL 17 and newer. The core migration performs
+its effective `MAINTAIN` checks inside a nested version guard using dynamic SQL,
+so PostgreSQL 15/16 never parse the unsupported privilege name. The read-only
+verification reads `MAINTAIN` from ACL metadata instead of passing it to a
+privilege-check function.
+
 ## Transactional postflight
 
 Immediately before `COMMIT`, the core migration runs a final fail-closed `DO`
 block. It rechecks the exact 34-table/RLS inventory, dangerous effective grants,
 the 12-table anonymous allowlist, the marketplace-party grant matrix and seller
-INSERT policy, financial-view state, the complete six retained policy
-predicates, all expected Phase 3.2B read policies, child guards and permissive
-seller paths, complete helper definitions and grants, anonymous helper
+INSERT policy, financial-view state, the six retained policies' metadata,
+dependencies, and critical predicate ingredients, all expected Phase 3.2B read
+policies, child guards and permissive seller paths, complete helper definitions
+and grants, anonymous helper
 dependencies, and effective postgres defaults across all four scopes. Any
 failure raises inside the transaction and rolls back every change. The optional
 managed-role migration has an equivalent four-scope default-privilege
@@ -295,8 +324,9 @@ postflight. The external verification SQL remains read-only.
 1. Take and validate a restorable backup or Supabase point-in-time recovery
    position. Record recovery instructions outside this repository.
 2. Run the helper diagnostic and managed-role default diagnostic one section at
-   a time. They return metadata only. Confirm the live preflight inputs before
-   either migration is considered further.
+   a time. They return metadata only. Run the dedicated core preflight-only
+   artifact separately; it always ends in `ROLLBACK`. Confirm all live
+   preflight inputs before either migration is considered further.
 3. Have a second reviewer compare the exact inventory, grants, policy names,
    predicates, helper bodies, view ACL, default scopes, and timeout settings with
    the live audit evidence.

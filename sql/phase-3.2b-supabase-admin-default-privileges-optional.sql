@@ -151,26 +151,34 @@ BEGIN
     IF EXISTS (
         SELECT 1
         FROM (VALUES
-            ('public_tables'::text, 'r'::pg_catalog."char", 'public'::name),
-            ('public_sequences'::text, 'S'::pg_catalog."char", 'public'::name),
-            ('public_functions'::text, 'f'::pg_catalog."char", 'public'::name),
-            ('global_functions'::text, 'f'::pg_catalog."char", NULL::name)
-        ) AS expected(scope_name, object_type, schema_name)
+            ('public_tables'::text, 'r'::pg_catalog."char", 'r'::pg_catalog."char", 'public'::name),
+            ('public_sequences'::text, 'S'::pg_catalog."char", 's'::pg_catalog."char", 'public'::name),
+            ('public_functions'::text, 'f'::pg_catalog."char", 'f'::pg_catalog."char", 'public'::name),
+            ('global_functions'::text, 'f'::pg_catalog."char", 'f'::pg_catalog."char", NULL::name)
+        ) AS expected(
+            scope_name,
+            catalog_object_type,
+            acldefault_object_type,
+            schema_name
+        )
         LEFT JOIN pg_catalog.pg_namespace AS namespace
             ON namespace.nspname = expected.schema_name
         LEFT JOIN pg_catalog.pg_default_acl AS global_defaults
             ON global_defaults.defaclrole = owner_role_oid
-           AND global_defaults.defaclobjtype = expected.object_type
+           AND global_defaults.defaclobjtype = expected.catalog_object_type
            AND global_defaults.defaclnamespace = 0
         LEFT JOIN pg_catalog.pg_default_acl AS schema_defaults
             ON schema_defaults.defaclrole = owner_role_oid
-           AND schema_defaults.defaclobjtype = expected.object_type
+           AND schema_defaults.defaclobjtype = expected.catalog_object_type
            AND schema_defaults.defaclnamespace = namespace.oid
            AND expected.schema_name IS NOT NULL
         CROSS JOIN LATERAL pg_catalog.aclexplode(
             COALESCE(
                 global_defaults.defaclacl,
-                pg_catalog.acldefault(expected.object_type, owner_role_oid)
+                pg_catalog.acldefault(
+                    expected.acldefault_object_type,
+                    owner_role_oid
+                )
             ) || CASE
                 WHEN expected.schema_name IS NULL
                 THEN ARRAY[]::aclitem[]
@@ -184,7 +192,7 @@ BEGIN
         WHERE COALESCE(grantee.rolname, 'PUBLIC')
             IN ('PUBLIC', 'anon', 'authenticated')
           AND (
-              expected.object_type IN (
+              expected.catalog_object_type IN (
                   'r'::pg_catalog."char",
                   'S'::pg_catalog."char"
               )

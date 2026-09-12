@@ -10,6 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SQL_DIR = PROJECT_ROOT / "sql"
 AUDIT_PATH = SQL_DIR / "phase-3.2-rls-audit.sql"
 MIGRATION_PATH = SQL_DIR / "phase-3.2b-security-hardening.sql"
+PREFLIGHT_PATH = SQL_DIR / "phase-3.2b-security-hardening-preflight.sql"
 VERIFY_PATH = SQL_DIR / "phase-3.2b-security-hardening-verify.sql"
 HELPER_DIAGNOSTIC_PATH = SQL_DIR / "phase-3.2b-helper-function-definitions.sql"
 MANAGED_DIAGNOSTIC_PATH = (
@@ -127,7 +128,7 @@ def assert_complete_mixed_policy_alters(sql: str) -> None:
         assert "using (" in definition
         assert "or true" not in definition
         assert "public.current_marketplace_party_id()" in definition
-        assert "public.is_admin()" in definition
+        assert "public.is_admin()" not in definition
     assert "'published'::public.custom_offering_state" in alter_policy_definition(
         sql,
         "custom_offering_select_published_or_own",
@@ -135,8 +136,36 @@ def assert_complete_mixed_policy_alters(sql: str) -> None:
     for policy_name in set(MIXED_POLICIES) - {
         "custom_offering_select_published_or_own"
     }:
-        assert "'published'::public.product_lifecycle_state" in (
+        assert "'published'::public.product_state" in (
             alter_policy_definition(sql, policy_name)
+        )
+    for policy_name in set(MIXED_POLICIES) - {
+        "custom_offering_select_published_or_own",
+        "product_select_published_or_own",
+    }:
+        assert "from public.product as p" in alter_policy_definition(sql, policy_name)
+
+
+def preflight_do_block(sql: str) -> str:
+    start = sql.index("DO $phase32b_preflight$")
+    tag = "$phase32b_preflight$;"
+    return sql[start : sql.index(tag, start) + len(tag)]
+
+
+def assert_no_handcrafted_policy_expression_equality(sql: str) -> None:
+    compact = canonical_sql_source(sql)
+    assert "expected_using_expression" not in compact
+    for expression_source in (
+        "actual_policy.using_expr",
+        "policy_row.using_expr",
+        "actual.qual",
+        "policy.qual",
+        "pg_catalog.pg_get_expr",
+    ):
+        prefix = re.escape(f"regexp_replace(lower({expression_source}")
+        assert not re.search(
+            prefix + r".{0,500}(?:isdistinctfrom|=)pg_catalog\.regexp_replace",
+            compact,
         )
 
 
@@ -162,9 +191,32 @@ def test_diagnostics_audit_and_verification_are_read_only() -> None:
     assert_read_only_sql(MANAGED_DIAGNOSTIC_PATH, expected_statements=1)
 
 
+def test_preflight_only_artifact_is_rollback_scoped_and_has_no_migration_ops() -> None:
+    sql = read(PREFLIGHT_PATH)
+    normalized_sql = normalized(sql)
+    statements = parse_sql(sql)
+    assert normalized_sql.startswith("/* phase 3.2b core preflight-only artifact.")
+    assert normalized_sql.endswith("rollback;")
+    assert preflight_do_block(sql) == preflight_do_block(read(MIGRATION_PATH))
+    for safeguard in (
+        "set local lock_timeout = '5s';",
+        "set local statement_timeout = '5min';",
+        "set local idle_in_transaction_session_timeout = '5min';",
+        "set local search_path = pg_catalog;",
+    ):
+        assert normalized_sql.count(safeguard) == 1
+    assert len(statements) == 7
+    assert not re.search(
+        r"(?im)^\s*(alter|create|drop|execute|grant|revoke|truncate|insert|update|delete)\b",
+        sql,
+    )
+
+
 def test_only_explicit_migrations_contain_ddl_or_dcl_and_no_app_dml() -> None:
     mutation_paths = {MIGRATION_PATH, MANAGED_MIGRATION_PATH}
     for path in SQL_DIR.glob("*.sql"):
+        if path == PREFLIGHT_PATH:
+            continue
         statements = parse_sql(read(path))
         has_mutation = any(
             not isinstance(statement.stmt, ast.SelectStmt) for statement in statements
@@ -202,6 +254,26 @@ def test_core_migration_is_transactional_and_has_local_timeouts() -> None:
     assert "on all tables in schema" not in sql
 
 
+def test_product_enum_inventory_is_fail_closed_and_uses_live_type_name() -> None:
+    forbidden_type = "product_" + "lifecycle_state"
+    package_paths = (*SQL_DIR.glob("*.sql"), DOC_PATH, Path(__file__))
+    for path in package_paths:
+        assert forbidden_type not in read(path), path
+
+    preflight = normalized(preflight_do_block(read(MIGRATION_PATH)))
+    for required_type in (
+        "public.product_state",
+        "public.custom_offering_state",
+        "public.party_approval_state",
+    ):
+        assert f"pg_catalog.to_regtype('{required_type}') is null" in preflight
+    assert "pg_catalog.format('public.product_%s_state', 'lifecycle')" in preflight
+    assert ") is not null" in preflight
+
+    for path in (MIGRATION_PATH, PREFLIGHT_PATH, VERIFY_PATH, DOC_PATH):
+        assert "public.product_state" in read(path), path
+
+
 def test_inventory_preflight_uses_order_independent_set_equality() -> None:
     sql = normalized(read(MIGRATION_PATH))
     start = sql.index("expected_tables constant text[] := array[")
@@ -224,6 +296,12 @@ def test_preflight_checks_exact_audited_metadata_before_changes() -> None:
         assert policy_name in preflight
     assert "actual_policy.polcmd <> 'r'::pg_catalog.\"char\"" in preflight
     assert "not actual_policy.polpermissive" in preflight
+    assert "actual_policy.check_expr is not null" in preflight
+    assert "pg_catalog.pg_depend" in preflight
+    assert "public.current_marketplace_party_id()'::regprocedure" in preflight
+    assert "public.product'::regclass" in preflight
+    assert "position('is_admin' in lower(actual_policy.using_expr)) > 0" in preflight
+    assert "or[[:space:]]*[(]*[[:space:]]*true" in preflight
     assert "policy artifacts already exist" in preflight
     assert "marketplace_party table privilege drift" in preflight
     assert "financial view select grant drift" in preflight
@@ -369,13 +447,24 @@ def test_mixed_policy_validator_rejects_role_only_and_broadened_alters() -> None
         "product_select_published_or_own",
     )
     broadened_alter = product_alter.replace(
-        "lifecycle_state = 'published'::public.product_lifecycle_state",
-        "lifecycle_state = 'published'::public.product_lifecycle_state or true",
+        "lifecycle_state = 'published'::public.product_state",
+        "lifecycle_state = 'published'::public.product_state or true",
         1,
     )
     broadened = sql.replace(product_alter, broadened_alter, 1)
     with pytest.raises(AssertionError):
         assert_complete_mixed_policy_alters(broadened)
+
+
+def test_mixed_policy_checks_never_use_whitespace_only_expression_equality() -> None:
+    for path in (MIGRATION_PATH, PREFLIGHT_PATH, VERIFY_PATH):
+        assert_no_handcrafted_policy_expression_equality(read(path))
+
+    restored = read(MIGRATION_PATH) + (
+        "\n-- expected_using_expression compared by whitespace-only pg_get_expr\n"
+    )
+    with pytest.raises(AssertionError):
+        assert_no_handcrafted_policy_expression_equality(restored)
 
 
 def test_custom_offering_anonymous_predicate_is_explicitly_published() -> None:
@@ -391,8 +480,32 @@ def test_custom_offering_anonymous_predicate_is_explicitly_published() -> None:
         )
         assert not any(helper in definition for helper in HELPER_FUNCTIONS)
     preflight = sql[: sql.index("-- existing public base-table grants")]
-    assert "expected_using_expression" in preflight
-    assert "is distinct from pg_catalog.regexp_replace" in preflight
+    assert "state_column" in preflight
+    assert "state_type" in preflight
+    assert "expected_using_expression" not in preflight
+    assert "lower(actual_policy.using_expr)" in preflight
+
+
+def test_child_permissive_read_policies_never_add_admin_access() -> None:
+    sql = normalized(read(MIGRATION_PATH))
+    child_owner_policies = (
+        "phase32b_product_color_owner_read",
+        "phase32b_product_image_owner_read",
+        "phase32b_product_3d_model_owner_read",
+        "phase32b_enrichment_owner_read",
+    )
+    child_mixed_policies = set(MIXED_POLICIES) - {
+        "custom_offering_select_published_or_own",
+        "product_select_published_or_own",
+    }
+    for policy_name in child_owner_policies:
+        definition = policy_definition(sql, policy_name)
+        assert "public.current_marketplace_party_id()" in definition
+        assert "public.is_admin()" not in definition
+    for policy_name in child_mixed_policies:
+        definition = alter_policy_definition(sql, policy_name)
+        assert "public.current_marketplace_party_id()" in definition
+        assert "public.is_admin()" not in definition
 
 
 def test_anonymous_catalog_policies_never_call_restricted_helpers() -> None:
@@ -585,6 +698,41 @@ def test_catalog_codes_always_use_pg_catalog_internal_char() -> None:
             assert re.match(r"::\s*pg_catalog\.\"char\"", suffix), path
 
 
+def test_sequence_default_acl_uses_distinct_catalog_and_acldefault_codes() -> None:
+    effective_default_paths = (
+        MIGRATION_PATH,
+        VERIFY_PATH,
+        MANAGED_DIAGNOSTIC_PATH,
+        MANAGED_MIGRATION_PATH,
+    )
+    unsafe_indirect = re.compile(
+        r"acldefault\s*\(\s*expected\."
+        r"(?:object_type(?:_code)?|catalog_object_type(?:_code)?)",
+        re.IGNORECASE,
+    )
+    for path in SQL_DIR.glob("*.sql"):
+        sql = read(path)
+        assert not re.search(
+            r"acldefault\s*\(\s*'S'::\s*pg_catalog\.\"char\"",
+            sql,
+        ), path
+        assert not unsafe_indirect.search(sql), path
+
+    for path in effective_default_paths:
+        sql = read(path)
+        assert "catalog_object_type" in sql, path
+        assert "acldefault_object_type" in sql, path
+        sequence_positions = [
+            match.start() for match in re.finditer("'public_sequences'", sql)
+        ]
+        assert sequence_positions, path
+        for start in sequence_positions:
+            end = sql.find("'public_functions'", start)
+            sequence_mapping = sql[start:end]
+            assert "'S'::pg_catalog.\"char\"" in sequence_mapping, path
+            assert "'s'::pg_catalog.\"char\"" in sequence_mapping, path
+
+
 def test_core_has_fail_closed_transactional_postflight() -> None:
     sql = normalized(read(MIGRATION_PATH))
     start = sql.index("do $phase32b_postflight$")
@@ -598,7 +746,7 @@ def test_core_has_fail_closed_transactional_postflight() -> None:
         "marketplace_party grant matrix mismatch",
         "seller insert policy mismatch",
         "financial view hardening mismatch",
-        "exact mixed-policy mismatch",
+        "mixed-policy mismatch",
         "expected read policy mismatch",
         "child write path mismatch",
         "helper mismatch",
@@ -610,6 +758,25 @@ def test_core_has_fail_closed_transactional_postflight() -> None:
     ):
         assert invariant in postflight
     assert "raise exception" in postflight
+
+
+def test_maintain_checks_are_dynamically_version_gated_for_postgresql_15() -> None:
+    migration = normalized(read(MIGRATION_PATH))
+    postflight = migration[migration.index("do $phase32b_postflight$") :]
+    version_guard = "if current_setting('server_version_num')::integer >= 170000 then"
+    assert version_guard in postflight
+    maintain_check = postflight[postflight.index(version_guard) :]
+    assert "execute $maintain_check$" in maintain_check
+    assert "has_table_privilege($1, relation.oid, 'maintain')" in maintain_check
+    assert "using anon_role_oid, authenticated_role_oid" in maintain_check
+    assert not re.search(r"if .*>= 170000\s+and\s+exists", postflight)
+
+    verification = normalized(read(VERIFY_PATH))
+    assert not re.search(
+        r"has_table_privilege\([^)]*'maintain'",
+        verification,
+    )
+    assert "acl.privilege_type = 'maintain'" in verification
 
 
 def test_verification_uses_four_effective_default_privilege_scopes() -> None:
@@ -660,10 +827,12 @@ def test_verification_has_all_expected_read_and_write_policies() -> None:
     assert "has_no_admin_grant_claim" in sql
     assert "anon_helper_dependency" in sql
     section = numbered_section(sql, 5, 6)
-    assert "exact_mixed" in section
-    assert "expected_using_expression" in section
-    assert "is distinct from" not in section or "regexp_replace" in section
-    assert "or true" not in section
+    assert "mixed_metadata" in section
+    assert "expected_using_expression" not in section
+    assert "pg_catalog.pg_depend" in section
+    assert "pg_catalog.pg_policy" in section
+    assert "or[[:space:]]*[(]*[[:space:]]*true" in section
+    assert "lower(actual.qual) !~ 'is_admin'" in section
 
 
 def test_verification_has_one_row_per_section_summary() -> None:
@@ -684,7 +853,8 @@ def test_verification_has_one_row_per_section_summary() -> None:
 
 
 def test_documentation_corrects_admin_timeout_and_default_scope_claims() -> None:
-    doc = normalized(read(DOC_PATH))
+    raw_doc = read(DOC_PATH)
+    doc = normalized(raw_doc)
     assert "lock_timeout" in doc
     assert "rolls back" in doc
     assert "never" in doc and "increas" in doc
@@ -692,12 +862,16 @@ def test_documentation_corrects_admin_timeout_and_default_scope_claims() -> None
     assert "supabase_admin" in doc
     assert "not fixed" in doc or "deferred" in doc
     assert "phase 3.2c" in doc
+    assert raw_doc.count("## Verification") == 1
+    assert "public.product_state" in raw_doc
+    assert "preflight-only" in doc
 
 
 def test_security_artifacts_contain_no_secret_or_record_values() -> None:
     paths = (
         AUDIT_PATH,
         MIGRATION_PATH,
+        PREFLIGHT_PATH,
         VERIFY_PATH,
         HELPER_DIAGNOSTIC_PATH,
         MANAGED_DIAGNOSTIC_PATH,
