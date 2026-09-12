@@ -12,9 +12,9 @@ WITH default_acl AS (
         COALESCE(namespace.nspname, '<all_schemas>') AS schema_scope,
         defaults.defaclobjtype,
         CASE defaults.defaclobjtype
-            WHEN 'r' THEN 'table'
-            WHEN 'S' THEN 'sequence'
-            WHEN 'f' THEN 'function'
+            WHEN 'r'::pg_catalog."char" THEN 'table'
+            WHEN 'S'::pg_catalog."char" THEN 'sequence'
+            WHEN 'f'::pg_catalog."char" THEN 'function'
             ELSE defaults.defaclobjtype::text
         END AS object_type,
         CASE WHEN acl.grantee = 0 THEN 'PUBLIC' ELSE grantee.rolname END
@@ -29,7 +29,69 @@ WITH default_acl AS (
     CROSS JOIN LATERAL pg_catalog.aclexplode(defaults.defaclacl) AS acl
     LEFT JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = acl.grantee
     WHERE owner_role.rolname = 'supabase_admin'
-      AND defaults.defaclobjtype IN ('r', 'S', 'f')
+      AND defaults.defaclobjtype IN (
+          'r'::pg_catalog."char",
+          'S'::pg_catalog."char",
+          'f'::pg_catalog."char"
+      )
+),
+managed_role AS (
+    SELECT oid
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'supabase_admin'
+),
+expected_scopes(scope_name, object_type, schema_name) AS (
+    VALUES
+        ('public_tables'::text, 'r'::pg_catalog."char", 'public'::name),
+        ('public_sequences'::text, 'S'::pg_catalog."char", 'public'::name),
+        ('public_functions'::text, 'f'::pg_catalog."char", 'public'::name),
+        ('global_functions'::text, 'f'::pg_catalog."char", NULL::name)
+),
+effective_scopes AS (
+    SELECT
+        expected.scope_name,
+        expected.schema_name,
+        expected.object_type,
+        NOT EXISTS (
+            SELECT 1
+            FROM pg_catalog.aclexplode(
+                COALESCE(
+                    global_defaults.defaclacl,
+                    pg_catalog.acldefault(expected.object_type, owner.oid)
+                ) || CASE
+                    WHEN expected.schema_name IS NULL
+                    THEN ARRAY[]::aclitem[]
+                    ELSE COALESCE(
+                        schema_defaults.defaclacl,
+                        ARRAY[]::aclitem[]
+                    )
+                END
+            ) AS acl
+            LEFT JOIN pg_catalog.pg_roles AS grantee
+                ON grantee.oid = acl.grantee
+            WHERE COALESCE(grantee.rolname, 'PUBLIC')
+                IN ('PUBLIC', 'anon', 'authenticated')
+              AND (
+                  expected.object_type IN (
+                      'r'::pg_catalog."char",
+                      'S'::pg_catalog."char"
+                  )
+                  OR acl.privilege_type = 'EXECUTE'
+              )
+        ) AS check_passed
+    FROM expected_scopes AS expected
+    CROSS JOIN managed_role AS owner
+    LEFT JOIN pg_catalog.pg_namespace AS namespace
+        ON namespace.nspname = expected.schema_name
+    LEFT JOIN pg_catalog.pg_default_acl AS global_defaults
+        ON global_defaults.defaclrole = owner.oid
+       AND global_defaults.defaclobjtype = expected.object_type
+       AND global_defaults.defaclnamespace = 0
+    LEFT JOIN pg_catalog.pg_default_acl AS schema_defaults
+        ON schema_defaults.defaclrole = owner.oid
+       AND schema_defaults.defaclobjtype = expected.object_type
+       AND schema_defaults.defaclnamespace = namespace.oid
+       AND expected.schema_name IS NOT NULL
 ),
 authority AS (
     SELECT
@@ -59,7 +121,8 @@ SELECT
     defaults.is_grantable,
     NULL::name AS deployment_role,
     NULL::boolean AS supabase_admin_present,
-    NULL::boolean AS can_alter_supabase_admin_defaults
+    NULL::boolean AS can_alter_supabase_admin_defaults,
+    NULL::boolean AS check_passed
 FROM default_acl AS defaults
 UNION ALL
 SELECT
@@ -72,6 +135,21 @@ SELECT
     NULL::boolean,
     authority.deployment_role,
     authority.supabase_admin_present,
-    authority.can_alter_supabase_admin_defaults
+    authority.can_alter_supabase_admin_defaults,
+    NULL::boolean
 FROM authority
+UNION ALL
+SELECT
+    'effective_future_privilege'::text,
+    'supabase_admin'::name,
+    COALESCE(effective.schema_name, '<all_schemas>'::name),
+    effective.scope_name,
+    NULL::name,
+    NULL::text,
+    NULL::boolean,
+    NULL::name,
+    true,
+    NULL::boolean,
+    effective.check_passed
+FROM effective_scopes AS effective
 ORDER BY record_type, schema_scope, object_type, grantee_name, privilege_type;

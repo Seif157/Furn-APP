@@ -3,6 +3,7 @@
 import re
 from pathlib import Path
 
+import pytest
 from pglast import ast, parse_sql
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -109,6 +110,36 @@ def policy_definition(sql: str, policy_name: str) -> str:
     return sql[start : sql.index(";", start)]
 
 
+def alter_policy_definition(sql: str, policy_name: str) -> str:
+    start = sql.index(f"alter policy {policy_name}")
+    return sql[start : sql.index(";", start)]
+
+
+def canonical_sql_source(source: str) -> str:
+    return re.sub(r"\s", "", source.strip().rstrip(";").strip().lower())
+
+
+def assert_complete_mixed_policy_alters(sql: str) -> None:
+    for policy_name, table_name in MIXED_POLICIES.items():
+        definition = alter_policy_definition(sql, policy_name)
+        assert f"on public.{table_name}" in definition
+        assert "to authenticated" in definition
+        assert "using (" in definition
+        assert "or true" not in definition
+        assert "public.current_marketplace_party_id()" in definition
+        assert "public.is_admin()" in definition
+    assert "'published'::public.custom_offering_state" in alter_policy_definition(
+        sql,
+        "custom_offering_select_published_or_own",
+    )
+    for policy_name in set(MIXED_POLICIES) - {
+        "custom_offering_select_published_or_own"
+    }:
+        assert "'published'::public.product_lifecycle_state" in (
+            alter_policy_definition(sql, policy_name)
+        )
+
+
 def assert_read_only_sql(path: Path, *, expected_statements: int) -> None:
     statements = parse_sql(read(path))
     assert len(statements) == expected_statements
@@ -191,7 +222,7 @@ def test_preflight_checks_exact_audited_metadata_before_changes() -> None:
     preflight = sql[: sql.index("-- existing public base-table grants")]
     for policy_name in MIXED_POLICIES:
         assert policy_name in preflight
-    assert "actual_policy.polcmd <> 'r'" in preflight
+    assert "actual_policy.polcmd <> 'r'::pg_catalog.\"char\"" in preflight
     assert "not actual_policy.polpermissive" in preflight
     assert "policy artifacts already exist" in preflight
     assert "marketplace_party table privilege drift" in preflight
@@ -307,16 +338,44 @@ def test_financial_view_is_preflighted_hardened_and_visibly_verified() -> None:
 
 def test_policy_splitting_is_explicit_and_never_regex_generated() -> None:
     sql = normalized(read(MIGRATION_PATH))
-    mutation_block = sql[sql.index("-- split only the six explicitly reviewed") :]
-    for policy_name, table_name in MIXED_POLICIES.items():
-        expected_alter = (
-            f"alter policy {policy_name} on public.{table_name} to authenticated"
+    mutation_block = sql[
+        sql.index("-- split only the six explicitly reviewed") : sql.index(
+            "create policy phase32b_custom_offering_anon_read"
         )
-        assert expected_alter in sql
+    ]
+    assert_complete_mixed_policy_alters(sql)
     assert "public_expression" not in sql
     assert "execute format( 'create policy" not in sql
     assert "phase32b_split_catalogue_owner_policies" not in sql
     assert "regexp_replace" not in mutation_block
+
+
+def test_mixed_policy_validator_rejects_role_only_and_broadened_alters() -> None:
+    sql = normalized(read(MIGRATION_PATH))
+    assert_complete_mixed_policy_alters(sql)
+
+    role_only = re.sub(
+        r"(alter policy product_select_published_or_own .*?to authenticated)"
+        r" using \(.*?\);",
+        r"\1;",
+        sql,
+        count=1,
+    )
+    with pytest.raises(AssertionError):
+        assert_complete_mixed_policy_alters(role_only)
+
+    product_alter = alter_policy_definition(
+        sql,
+        "product_select_published_or_own",
+    )
+    broadened_alter = product_alter.replace(
+        "lifecycle_state = 'published'::public.product_lifecycle_state",
+        "lifecycle_state = 'published'::public.product_lifecycle_state or true",
+        1,
+    )
+    broadened = sql.replace(product_alter, broadened_alter, 1)
+    with pytest.raises(AssertionError):
+        assert_complete_mixed_policy_alters(broadened)
 
 
 def test_custom_offering_anonymous_predicate_is_explicitly_published() -> None:
@@ -332,7 +391,8 @@ def test_custom_offering_anonymous_predicate_is_explicitly_published() -> None:
         )
         assert not any(helper in definition for helper in HELPER_FUNCTIONS)
     preflight = sql[: sql.index("-- existing public base-table grants")]
-    assert "actual_policy.using_expr !~* 'publication_state.*published'" in preflight
+    assert "expected_using_expression" in preflight
+    assert "is distinct from pg_catalog.regexp_replace" in preflight
 
 
 def test_anonymous_catalog_policies_never_call_restricted_helpers() -> None:
@@ -384,6 +444,7 @@ def test_helpers_have_exact_preflight_and_hardened_definitions() -> None:
     preflight = sql[: sql.index("-- existing public base-table grants")]
     assert "expected_helper_source" in preflight
     assert "actual_helper_source is distinct from expected_helper_source" in preflight
+    assert "'[[:space:]]', '', 'g'" in preflight
     assert sql.count("create or replace function public.") == 3
     assert sql.count("language sql stable security definer set search_path = ''") == 3
     assert "from public.admin_user as admin_row" in sql
@@ -395,6 +456,61 @@ def test_helpers_have_exact_preflight_and_hardened_definitions() -> None:
             f"grant execute on function public.{name}() to authenticated, service_role"
             in sql
         )
+
+
+def test_live_helper_body_fixtures_use_whitespace_only_canonical_equality() -> None:
+    fixtures = {
+        "is_admin": """
+            SELECT EXISTS (
+              SELECT 1
+              FROM public.admin_user a
+              WHERE a.user_id = auth.uid()
+                AND a.is_active
+            );
+        """,
+        "current_marketplace_party_id": """
+            SELECT mp.id
+            FROM public.marketplace_party mp
+            WHERE mp.user_id = auth.uid();
+        """,
+        "current_party_is_approved": """
+            SELECT EXISTS (
+              SELECT 1
+              FROM public.marketplace_party mp
+              WHERE mp.user_id = auth.uid()
+                AND mp.approval_state = 'approved'
+            );
+        """,
+    }
+    differently_spaced = {
+        name: " \n\t".join(source.split()) for name, source in fixtures.items()
+    }
+    for name, source in fixtures.items():
+        assert canonical_sql_source(source) == canonical_sql_source(
+            differently_spaced[name]
+        )
+
+    inactive_removed = fixtures["is_admin"].replace("AND a.is_active", "")
+    approved_removed = fixtures["current_party_is_approved"].replace(
+        "AND mp.approval_state = 'approved'",
+        "",
+    )
+    assert canonical_sql_source(inactive_removed) != canonical_sql_source(
+        fixtures["is_admin"]
+    )
+    assert canonical_sql_source(approved_removed) != canonical_sql_source(
+        fixtures["current_party_is_approved"]
+    )
+
+
+def test_verification_compares_complete_hardened_helper_sources() -> None:
+    section = normalized(numbered_section(read(VERIFY_PATH), 7, 8))
+    assert "complete_definition_matches" in section
+    assert "function_row.prosrc" in section
+    assert "expected.source_text" in section
+    assert "admin_row.is_active" in section
+    assert "party.approval_state" in section
+    assert "'approved'::public.party_approval_state" in section
 
 
 def test_core_default_changes_are_exactly_scoped_and_exclude_managed_role() -> None:
@@ -409,6 +525,10 @@ def test_core_default_changes_are_exactly_scoped_and_exclude_managed_role() -> N
         " privileges on sequences from public, anon, authenticated" in sql
     )
     assert (
+        "alter default privileges for role postgres in schema public revoke execute"
+        " on functions from public, anon, authenticated" in sql
+    )
+    assert (
         "alter default privileges for role postgres revoke execute on functions"
         " from public, anon, authenticated" in sql
     )
@@ -418,6 +538,9 @@ def test_core_default_changes_are_exactly_scoped_and_exclude_managed_role() -> N
         sql,
     )
     assert "postgres default-acl namespace scope drift" in sql
+    preflight = sql[: sql.index("-- existing public base-table grants")]
+    assert "'f'::pg_catalog.\"char\", 'public'::name, 'anon'::name" in preflight
+    assert "'f'::pg_catalog.\"char\", null::name" not in preflight
 
 
 def test_managed_role_defaults_are_separate_diagnostic_and_optional_migration() -> None:
@@ -437,6 +560,71 @@ def test_managed_role_defaults_are_separate_diagnostic_and_optional_migration() 
         "alter default privileges for role supabase_admin revoke execute on functions"
         in optional
     )
+    assert (
+        "alter default privileges for role supabase_admin in schema public revoke"
+        " execute on functions from public, anon, authenticated" in optional
+    )
+    assert "phase32b_managed_defaults_postflight" in optional
+    for scope_name in (
+        "public_tables",
+        "public_sequences",
+        "public_functions",
+        "global_functions",
+    ):
+        assert scope_name in diagnostic
+        assert scope_name in optional
+
+
+def test_catalog_codes_always_use_pg_catalog_internal_char() -> None:
+    paths = tuple(SQL_DIR.glob("*.sql"))
+    for path in paths:
+        sql = read(path)
+        assert not re.search(r"::\s*char\b", sql, re.IGNORECASE), path
+        for match in re.finditer(r"acldefault\s*\(\s*'([rSf])'", sql):
+            suffix = sql[match.end() : match.end() + 40]
+            assert re.match(r"::\s*pg_catalog\.\"char\"", suffix), path
+
+
+def test_core_has_fail_closed_transactional_postflight() -> None:
+    sql = normalized(read(MIGRATION_PATH))
+    start = sql.index("do $phase32b_postflight$")
+    commit = sql.rindex("commit;")
+    assert start < commit
+    postflight = sql[start:commit]
+    for invariant in (
+        "34-table inventory or rls mismatch",
+        "dangerous public or anon privilege remains",
+        "anonymous select allowlist mismatch",
+        "marketplace_party grant matrix mismatch",
+        "seller insert policy mismatch",
+        "financial view hardening mismatch",
+        "exact mixed-policy mismatch",
+        "expected read policy mismatch",
+        "child write path mismatch",
+        "helper mismatch",
+        "anon helper dependency remains",
+        "public_tables",
+        "public_sequences",
+        "public_functions",
+        "global_functions",
+    ):
+        assert invariant in postflight
+    assert "raise exception" in postflight
+
+
+def test_verification_uses_four_effective_default_privilege_scopes() -> None:
+    section = normalized(numbered_section(read(VERIFY_PATH), 11, 12))
+    for scope_name in (
+        "public_tables",
+        "public_sequences",
+        "public_functions",
+        "global_functions",
+    ):
+        assert scope_name in section
+    assert "pg_catalog.acldefault" in section
+    assert "global_defaults.defaclacl" in section
+    assert "schema_defaults.defaclacl" in section
+    assert "missing_expected_postgres_default_acl" not in section
 
 
 def test_verification_sections_03_through_06_fail_visibly() -> None:
@@ -471,6 +659,11 @@ def test_verification_has_all_expected_read_and_write_policies() -> None:
     assert "permissive_seller_policy_present" in sql
     assert "has_no_admin_grant_claim" in sql
     assert "anon_helper_dependency" in sql
+    section = numbered_section(sql, 5, 6)
+    assert "exact_mixed" in section
+    assert "expected_using_expression" in section
+    assert "is distinct from" not in section or "regexp_replace" in section
+    assert "or true" not in section
 
 
 def test_verification_has_one_row_per_section_summary() -> None:
@@ -487,6 +680,7 @@ def test_verification_has_one_row_per_section_summary() -> None:
         assert f"'{section_number:02d}'::text" in section
     assert "('05'::text, 30::bigint)" in section
     assert "('06'::text, 12::bigint)" in section
+    assert "('11'::text, 4::bigint)" in section
 
 
 def test_documentation_corrects_admin_timeout_and_default_scope_claims() -> None:

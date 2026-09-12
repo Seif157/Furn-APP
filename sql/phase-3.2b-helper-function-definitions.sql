@@ -46,7 +46,10 @@ SELECT
         FROM pg_catalog.aclexplode(
             COALESCE(
                 function_row.proacl,
-                pg_catalog.acldefault('f', function_row.proowner)
+                pg_catalog.acldefault(
+                    'f'::pg_catalog."char",
+                    function_row.proowner
+                )
             )
         ) AS acl
         WHERE acl.grantee = 0

@@ -55,7 +55,10 @@ SELECT
     EXISTS (
         SELECT 1
         FROM pg_catalog.aclexplode(
-            COALESCE(t.relacl, pg_catalog.acldefault('r', t.relowner))
+            COALESCE(
+                t.relacl,
+                pg_catalog.acldefault('r'::pg_catalog."char", t.relowner)
+            )
         ) AS acl
         WHERE acl.grantee = 0
           AND acl.privilege_type = privilege.privilege_name
@@ -65,7 +68,10 @@ SELECT
         ELSE EXISTS (
             SELECT 1
             FROM pg_catalog.aclexplode(
-                COALESCE(t.relacl, pg_catalog.acldefault('r', t.relowner))
+                COALESCE(
+                    t.relacl,
+                    pg_catalog.acldefault('r'::pg_catalog."char", t.relowner)
+                )
             ) AS acl
             WHERE acl.grantee = requested_role.oid
               AND acl.privilege_type = privilege.privilege_name
@@ -432,7 +438,10 @@ SELECT
         FROM pg_catalog.aclexplode(
             COALESCE(
                 view_row.relacl,
-                pg_catalog.acldefault('r', view_row.relowner)
+                pg_catalog.acldefault(
+                    'r'::pg_catalog."char",
+                    view_row.relowner
+                )
             )
         ) AS acl
         WHERE acl.grantee = 0
@@ -550,12 +559,12 @@ SELECT
     owner_role.rolname AS owner_name,
     COALESCE(namespace.nspname, '<all_schemas>') AS schema_scope,
     CASE defaults.defaclobjtype
-        WHEN 'r' THEN 'table'
-        WHEN 'S' THEN 'sequence'
-        WHEN 'f' THEN 'function'
-        WHEN 'T' THEN 'type'
-        WHEN 'n' THEN 'schema'
-        WHEN 'L' THEN 'large_object'
+        WHEN 'r'::pg_catalog."char" THEN 'table'
+        WHEN 'S'::pg_catalog."char" THEN 'sequence'
+        WHEN 'f'::pg_catalog."char" THEN 'function'
+        WHEN 'T'::pg_catalog."char" THEN 'type'
+        WHEN 'n'::pg_catalog."char" THEN 'schema'
+        WHEN 'L'::pg_catalog."char" THEN 'large_object'
         ELSE defaults.defaclobjtype::text
     END AS object_type,
     CASE
@@ -565,17 +574,17 @@ SELECT
     acl.privilege_type,
     acl.is_grantable,
     CASE
-        WHEN defaults.defaclobjtype = 'r'
+        WHEN defaults.defaclobjtype = 'r'::pg_catalog."char"
          AND COALESCE(grantee_role.rolname, 'PUBLIC')
              IN ('PUBLIC', 'anon', 'authenticated')
          AND acl.privilege_type IN ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE')
         THEN 'CRITICAL:new_tables_receive_client_write_privilege'
-        WHEN defaults.defaclobjtype = 'r'
+        WHEN defaults.defaclobjtype = 'r'::pg_catalog."char"
          AND COALESCE(grantee_role.rolname, 'PUBLIC')
              IN ('PUBLIC', 'anon', 'authenticated')
          AND acl.privilege_type = 'SELECT'
         THEN 'HIGH:new_tables_receive_client_read_privilege'
-        WHEN defaults.defaclobjtype = 'f'
+        WHEN defaults.defaclobjtype = 'f'::pg_catalog."char"
          AND COALESCE(grantee_role.rolname, 'PUBLIC')
              IN ('PUBLIC', 'anon', 'authenticated')
          AND acl.privilege_type = 'EXECUTE'
@@ -680,7 +689,10 @@ SELECT
             FROM pg_catalog.aclexplode(
                 COALESCE(
                     function_row.proacl,
-                    pg_catalog.acldefault('f', function_row.proowner)
+                    pg_catalog.acldefault(
+                        'f'::pg_catalog."char",
+                        function_row.proowner
+                    )
                 )
             ) AS acl
             WHERE acl.grantee = 0
@@ -727,7 +739,10 @@ SELECT
              FROM pg_catalog.aclexplode(
                  COALESCE(
                      function_row.proacl,
-                     pg_catalog.acldefault('f', function_row.proowner)
+                     pg_catalog.acldefault(
+                         'f'::pg_catalog."char",
+                         function_row.proowner
+                     )
                  )
              ) AS acl
              WHERE acl.grantee = 0

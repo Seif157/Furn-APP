@@ -2,8 +2,8 @@
 OPTIONAL MANAGED-ROLE MIGRATION - NOT PART OF THE CORE PHASE 3.2B DEPLOYMENT.
 
 Do not run until the companion read-only diagnostic has been reviewed and this
-exact scope has passed in staging. Any global table/sequence or schema-local
-function client grant is treated as drift and aborts before changes.
+exact scope has passed in staging. The live audit found public-schema table,
+sequence, and function rows and no global function row.
 */
 
 BEGIN;
@@ -11,6 +11,7 @@ BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '5min';
 SET LOCAL idle_in_transaction_session_timeout = '5min';
+SET LOCAL search_path = pg_catalog;
 
 DO $phase32b_managed_defaults_preflight$
 DECLARE
@@ -63,9 +64,16 @@ BEGIN
           AND COALESCE(grantee.rolname, 'PUBLIC')
               IN ('PUBLIC', 'anon', 'authenticated')
           AND (
-              (defaults.defaclobjtype IN ('r', 'S')
-               AND namespace.nspname IS DISTINCT FROM 'public')
-              OR (defaults.defaclobjtype = 'f' AND defaults.defaclnamespace <> 0)
+              defaults.defaclobjtype IN (
+                  'r'::pg_catalog."char",
+                  'S'::pg_catalog."char",
+                  'f'::pg_catalog."char"
+              )
+              AND namespace.nspname IS DISTINCT FROM 'public'
+              AND NOT (
+                  defaults.defaclobjtype = 'f'::pg_catalog."char"
+                  AND defaults.defaclnamespace = 0
+              )
           )
     ) THEN
         RAISE EXCEPTION USING
@@ -75,13 +83,12 @@ BEGIN
     FOR default_expectation IN
         SELECT *
         FROM (VALUES
-            ('r'::char, 'public'::name, 'anon'::name),
-            ('r'::char, 'public'::name, 'authenticated'::name),
-            ('S'::char, 'public'::name, 'anon'::name),
-            ('S'::char, 'public'::name, 'authenticated'::name),
-            ('f'::char, NULL::name, 'PUBLIC'::name),
-            ('f'::char, NULL::name, 'anon'::name),
-            ('f'::char, NULL::name, 'authenticated'::name)
+            ('r'::pg_catalog."char", 'public'::name, 'anon'::name),
+            ('r'::pg_catalog."char", 'public'::name, 'authenticated'::name),
+            ('S'::pg_catalog."char", 'public'::name, 'anon'::name),
+            ('S'::pg_catalog."char", 'public'::name, 'authenticated'::name),
+            ('f'::pg_catalog."char", 'public'::name, 'anon'::name),
+            ('f'::pg_catalog."char", 'public'::name, 'authenticated'::name)
         ) AS expected(object_type, schema_name, grantee_name)
     LOOP
         IF NOT EXISTS (
@@ -100,7 +107,8 @@ BEGIN
               AND COALESCE(grantee.rolname, 'PUBLIC') =
                   default_expectation.grantee_name
               AND (
-                  default_expectation.object_type <> 'f'
+                  default_expectation.object_type <>
+                      'f'::pg_catalog."char"
                   OR acl.privilege_type = 'EXECUTE'
               )
         ) THEN
@@ -122,9 +130,71 @@ REVOKE ALL PRIVILEGES ON TABLES FROM PUBLIC, anon, authenticated;
 ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
 REVOKE ALL PRIVILEGES ON SEQUENCES FROM PUBLIC, anon, authenticated;
 
--- PostgreSQL's implicit PUBLIC function EXECUTE is global. A schema-local
--- revoke cannot subtract a privilege inherited from that global default.
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
+REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated;
+
+-- PostgreSQL's implicit PUBLIC function EXECUTE is global. The separate global
+-- revoke is needed because a schema-local default cannot subtract from it.
 ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin
 REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated;
+
+DO $phase32b_managed_defaults_postflight$
+DECLARE
+    owner_role_oid oid;
+BEGIN
+    SELECT oid INTO STRICT owner_role_oid
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'supabase_admin';
+
+    -- Missing rows are valid after REVOKE. Compute the effective ACL from the
+    -- hard-wired/global default plus any schema-local additions instead.
+    IF EXISTS (
+        SELECT 1
+        FROM (VALUES
+            ('public_tables'::text, 'r'::pg_catalog."char", 'public'::name),
+            ('public_sequences'::text, 'S'::pg_catalog."char", 'public'::name),
+            ('public_functions'::text, 'f'::pg_catalog."char", 'public'::name),
+            ('global_functions'::text, 'f'::pg_catalog."char", NULL::name)
+        ) AS expected(scope_name, object_type, schema_name)
+        LEFT JOIN pg_catalog.pg_namespace AS namespace
+            ON namespace.nspname = expected.schema_name
+        LEFT JOIN pg_catalog.pg_default_acl AS global_defaults
+            ON global_defaults.defaclrole = owner_role_oid
+           AND global_defaults.defaclobjtype = expected.object_type
+           AND global_defaults.defaclnamespace = 0
+        LEFT JOIN pg_catalog.pg_default_acl AS schema_defaults
+            ON schema_defaults.defaclrole = owner_role_oid
+           AND schema_defaults.defaclobjtype = expected.object_type
+           AND schema_defaults.defaclnamespace = namespace.oid
+           AND expected.schema_name IS NOT NULL
+        CROSS JOIN LATERAL pg_catalog.aclexplode(
+            COALESCE(
+                global_defaults.defaclacl,
+                pg_catalog.acldefault(expected.object_type, owner_role_oid)
+            ) || CASE
+                WHEN expected.schema_name IS NULL
+                THEN ARRAY[]::aclitem[]
+                ELSE COALESCE(
+                    schema_defaults.defaclacl,
+                    ARRAY[]::aclitem[]
+                )
+            END
+        ) AS acl
+        LEFT JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = acl.grantee
+        WHERE COALESCE(grantee.rolname, 'PUBLIC')
+            IN ('PUBLIC', 'anon', 'authenticated')
+          AND (
+              expected.object_type IN (
+                  'r'::pg_catalog."char",
+                  'S'::pg_catalog."char"
+              )
+              OR acl.privilege_type = 'EXECUTE'
+          )
+    ) THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2B optional defaults postflight: unsafe effective default privilege';
+    END IF;
+END
+$phase32b_managed_defaults_postflight$;
 
 COMMIT;
