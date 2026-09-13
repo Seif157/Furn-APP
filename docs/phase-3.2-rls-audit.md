@@ -170,19 +170,30 @@ as safe.
 ### 07. Default privileges
 
 **Why:** reports altered default ACLs that can automatically grant access to
-future tables, sequences, functions, types, or schemas. This prevents a newly
-created public table from becoming client-accessible before its RLS design is
-ready.
+future tables, sequences, functions, types, or schemas. Section 07 now reports
+every namespace scope, including `public`, `<all_schemas>`, `storage`, and any
+other schema. The earlier `public`/global filter concealed reviewed Supabase
+storage defaults and was an audit blind spot. The first focused follow-up also
+filtered grantees to PUBLIC, `anon`, and `authenticated`, concealing
+`service_role`. Section 07 now has no grantee filter: it reports those four
+identities and any unexpected additional grantee.
 
-**Safe result:** no default table write is granted to `PUBLIC`, `anon`, or
-`authenticated`; default reads are granted only when intentional. An empty result
-means no altered defaults exist in the audited scope, not that every PostgreSQL
-built-in default is revoked. Function execution is checked again for the three
-helpers in Section 09.
+**Safe result:** every row has an identified owner, namespace, object type,
+grantee, privilege, and grant-option state. Application-controlled client
+defaults are limited to reviewed scopes. Supabase-managed defaults such as the
+exact reviewed `postgres`/`storage` signature are reported visibly and assessed
+separately rather than hidden or automatically classified as an application
+hardening failure. An empty result means no altered defaults exist, not that
+every PostgreSQL built-in default is revoked. Function execution is checked
+again for the three helpers in Section 09. For the currently reviewed storage
+signature, `anon` and `authenticated` are client roles; `service_role` is a
+managed elevated server role. It bypasses RLS and must remain server-only.
 
-**Risk:** automatic client writes to new tables are critical; automatic client
-reads are high; broad default function execution is high and especially risky
-for future security-definer functions.
+**Risk:** an unreviewed namespace, owner, grantee, privilege, object type, or
+grant option is high or critical depending on the access. Automatic application
+client writes to new tables are critical; automatic reads and broad future
+function execution are high. Managed-schema rows require exact-signature review
+before they are accepted.
 
 
 ### 08. Helper-function inventory

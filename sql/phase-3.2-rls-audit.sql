@@ -554,7 +554,11 @@ LEFT JOIN LATERAL (
 ORDER BY view_row.relname;
 
 
--- 07. Altered default privileges affecting future public-schema objects.
+-- 07. Altered default privileges in every namespace scope. This deliberately
+-- includes public, global (<all_schemas>), storage, and any other schema.
+-- It expands every non-owner ACL entry without a grantee filter, so PUBLIC,
+-- anon, authenticated, service_role, and any unexpected role remain visible.
+-- service_role is a managed elevated server role, not a client role.
 SELECT
     owner_role.rolname AS owner_name,
     COALESCE(namespace.nspname, '<all_schemas>') AS schema_scope,
@@ -599,8 +603,6 @@ LEFT JOIN pg_catalog.pg_namespace AS namespace
 CROSS JOIN LATERAL pg_catalog.aclexplode(defaults.defaclacl) AS acl
 LEFT JOIN pg_catalog.pg_roles AS grantee_role
     ON grantee_role.oid = acl.grantee
-WHERE namespace.nspname = 'public'
-   OR defaults.defaclnamespace = 0
 ORDER BY owner_name, schema_scope, object_type, grantee_name, acl.privilege_type;
 
 

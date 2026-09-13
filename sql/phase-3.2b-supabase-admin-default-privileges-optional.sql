@@ -22,6 +22,7 @@ BEGIN
     FOREACH required_role IN ARRAY ARRAY[
         'anon'::name,
         'authenticated'::name,
+        'service_role'::name,
         'supabase_admin'::name
     ]
     LOOP
@@ -37,6 +38,13 @@ BEGIN
                 );
         END IF;
     END LOOP;
+
+    IF pg_catalog.pg_has_role('anon', 'service_role', 'MEMBER')
+       OR pg_catalog.pg_has_role('authenticated', 'service_role', 'MEMBER')
+    THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2B optional defaults: client role must not inherit or assume service_role';
+    END IF;
 
     SELECT role_row.rolsuper
     INTO current_role_is_superuser
@@ -137,14 +145,35 @@ REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated;
 -- revoke is needed because a schema-local default cannot subtract from it.
 ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin
 REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin
+GRANT EXECUTE ON FUNCTIONS TO service_role;
 
 DO $phase32b_managed_defaults_postflight$
 DECLARE
     owner_role_oid oid;
+    anon_role_oid oid;
+    authenticated_role_oid oid;
+    service_role_oid oid;
 BEGIN
     SELECT oid INTO STRICT owner_role_oid
     FROM pg_catalog.pg_roles
     WHERE rolname = 'supabase_admin';
+    SELECT oid INTO STRICT anon_role_oid
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'anon';
+    SELECT oid INTO STRICT authenticated_role_oid
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'authenticated';
+    SELECT oid INTO STRICT service_role_oid
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'service_role';
+
+    IF pg_catalog.pg_has_role('anon', 'service_role', 'MEMBER')
+       OR pg_catalog.pg_has_role('authenticated', 'service_role', 'MEMBER')
+    THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2B optional defaults postflight: client role inherits or can assume service_role';
+    END IF;
 
     -- Missing rows are valid after REVOKE. Compute the effective ACL from the
     -- hard-wired/global default plus any schema-local additions instead.
@@ -188,9 +217,18 @@ BEGIN
                 )
             END
         ) AS acl
-        LEFT JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = acl.grantee
-        WHERE COALESCE(grantee.rolname, 'PUBLIC')
-            IN ('PUBLIC', 'anon', 'authenticated')
+        WHERE CASE
+            WHEN acl.grantee = 0 THEN true
+            ELSE pg_catalog.pg_has_role(
+                anon_role_oid,
+                acl.grantee,
+                'USAGE'
+            ) OR pg_catalog.pg_has_role(
+                authenticated_role_oid,
+                acl.grantee,
+                'USAGE'
+            )
+        END
           AND (
               expected.catalog_object_type IN (
                   'r'::pg_catalog."char",
@@ -201,6 +239,49 @@ BEGIN
     ) THEN
         RAISE EXCEPTION USING
             MESSAGE = 'Phase 3.2B optional defaults postflight: unsafe effective default privilege';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM (VALUES
+            ('public_functions'::text, 'public'::name),
+            ('global_functions'::text, NULL::name)
+        ) AS expected(scope_name, schema_name)
+        LEFT JOIN pg_catalog.pg_namespace AS namespace
+            ON namespace.nspname = expected.schema_name
+        LEFT JOIN pg_catalog.pg_default_acl AS global_defaults
+            ON global_defaults.defaclrole = owner_role_oid
+           AND global_defaults.defaclobjtype = 'f'::pg_catalog."char"
+           AND global_defaults.defaclnamespace = 0
+        LEFT JOIN pg_catalog.pg_default_acl AS schema_defaults
+            ON schema_defaults.defaclrole = owner_role_oid
+           AND schema_defaults.defaclobjtype = 'f'::pg_catalog."char"
+           AND schema_defaults.defaclnamespace = namespace.oid
+           AND expected.schema_name IS NOT NULL
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM pg_catalog.aclexplode(
+                COALESCE(
+                    global_defaults.defaclacl,
+                    pg_catalog.acldefault(
+                        'f'::pg_catalog."char",
+                        owner_role_oid
+                    )
+                ) || CASE
+                    WHEN expected.schema_name IS NULL
+                    THEN ARRAY[]::aclitem[]
+                    ELSE COALESCE(
+                        schema_defaults.defaclacl,
+                        ARRAY[]::aclitem[]
+                    )
+                END
+            ) AS acl
+            WHERE acl.grantee = service_role_oid
+              AND acl.privilege_type = 'EXECUTE'
+        )
+    ) THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2B optional defaults postflight: explicit service_role future-function EXECUTE missing';
     END IF;
 END
 $phase32b_managed_defaults_postflight$;

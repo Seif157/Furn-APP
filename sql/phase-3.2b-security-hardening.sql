@@ -36,6 +36,13 @@ DECLARE
     policy_expectation record;
     actual_policy record;
     policy_count integer;
+    normalized_policy_expression text;
+    canonical_policy_expression text;
+    boolean_prefix text;
+    and_operator_position integer;
+    or_operator_position integer;
+    and_operator_depth integer;
+    or_operator_depth integer;
     write_expectation record;
     default_expectation record;
     expected_tables constant text[] := ARRAY[
@@ -183,6 +190,19 @@ BEGIN
     SELECT role_row.oid INTO STRICT service_role_oid
     FROM pg_catalog.pg_roles AS role_row
     WHERE role_row.rolname = 'service_role';
+
+    IF pg_catalog.pg_has_role(
+        anon_role_oid,
+        service_role_oid,
+        'MEMBER'
+    ) OR pg_catalog.pg_has_role(
+        authenticated_role_oid,
+        service_role_oid,
+        'MEMBER'
+    ) THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2B client role must not inherit or assume service_role';
+    END IF;
 
     FOREACH required_column IN ARRAY ARRAY[
         'id',
@@ -478,60 +498,60 @@ BEGIN
             );
     END IF;
 
-    -- Validate the six Phase 3.2A mixed policies by catalog identity,
-    -- authorization dependencies, and critical predicate ingredients.
-    -- pg_get_expr() reconstructs SQL, so its formatting, parentheses, aliases,
-    -- and qualification are deliberately not treated as a stable fingerprint.
+    -- Validate the six Phase 3.2A mixed policies by catalog identity, complete
+    -- Boolean/operator semantics, and authorization dependencies. pg_get_expr()
+    -- reconstructs SQL, so alias and qualification changes are canonicalized;
+    -- grouping is checked independently instead of ignored.
     FOR policy_expectation IN
         SELECT *
         FROM (VALUES
             (
                 'custom_offering'::name,
                 'custom_offering_select_published_or_own'::name,
-                'publication_state'::text,
+                $canonical$publication_state='published'::custom_offering_stateormarketplace_party_id=current_marketplace_party_id$canonical$::text,
                 'public.custom_offering_state'::text,
                 false
             ),
             (
                 'product'::name,
                 'product_select_published_or_own'::name,
-                'lifecycle_state'::text,
+                $canonical$lifecycle_state='published'::product_stateormarketplace_party_id=current_marketplace_party_id$canonical$::text,
                 'public.product_state'::text,
                 false
             ),
             (
                 'product_color'::name,
                 'product_color_select'::name,
-                'lifecycle_state'::text,
+                $canonical$existsselect1fromproductwhereid=product_idandlifecycle_state='published'::product_stateormarketplace_party_id=current_marketplace_party_id$canonical$::text,
                 'public.product_state'::text,
                 true
             ),
             (
                 'product_image'::name,
                 'product_image_select'::name,
-                'lifecycle_state'::text,
+                $canonical$existsselect1fromproductwhereid=product_idandlifecycle_state='published'::product_stateormarketplace_party_id=current_marketplace_party_id$canonical$::text,
                 'public.product_state'::text,
                 true
             ),
             (
                 'product_3d_model'::name,
                 'product_3d_model_select'::name,
-                'lifecycle_state'::text,
+                $canonical$existsselect1fromproductwhereid=product_idandlifecycle_state='published'::product_stateormarketplace_party_id=current_marketplace_party_id$canonical$::text,
                 'public.product_state'::text,
                 true
             ),
             (
                 'product_enrichment_assignment'::name,
                 'product_enrichment_assignment_select'::name,
-                'lifecycle_state'::text,
+                $canonical$existsselect1fromproductwhereid=product_idandlifecycle_state='published'::product_stateormarketplace_party_id=current_marketplace_party_id$canonical$::text,
                 'public.product_state'::text,
                 true
             )
         ) AS expected(
             table_name,
             policy_name,
-            state_column,
-            state_type,
+            expected_canonical_expression,
+            expected_state_type,
             is_product_child
         )
     LOOP
@@ -571,6 +591,74 @@ BEGIN
           AND relation.relname = policy_expectation.table_name
           AND policy.polname = policy_expectation.policy_name;
 
+        normalized_policy_expression := pg_catalog.regexp_replace(
+            lower(actual_policy.using_expr),
+            '[[:space:]]+',
+            ' ',
+            'g'
+        );
+        canonical_policy_expression := normalized_policy_expression;
+        IF policy_expectation.is_product_child THEN
+            canonical_policy_expression := pg_catalog.regexp_replace(
+                canonical_policy_expression,
+                'from[[:space:]]+(public\.)?product([[:space:]]+as)?[[:space:]]+[a-z_][a-z0-9_]*[[:space:]]+where',
+                'from product where',
+                'g'
+            );
+        END IF;
+        canonical_policy_expression := pg_catalog.regexp_replace(
+            canonical_policy_expression,
+            '\m[a-z_][a-z0-9_]*\.',
+            '',
+            'g'
+        );
+        canonical_policy_expression := pg_catalog.regexp_replace(
+            canonical_policy_expression,
+            '[[:space:]()]',
+            '',
+            'g'
+        );
+        IF policy_expectation.is_product_child THEN
+            and_operator_position := position(
+                ' and ' IN normalized_policy_expression
+            );
+            or_operator_position := position(
+                ' or ' IN normalized_policy_expression
+            );
+            IF and_operator_position > 0 AND or_operator_position > 0 THEN
+                boolean_prefix := substring(
+                    normalized_policy_expression
+                    FROM 1 FOR and_operator_position - 1
+                );
+                and_operator_depth :=
+                    length(boolean_prefix)
+                    - length(replace(boolean_prefix, '(', ''))
+                    - length(boolean_prefix)
+                    + length(replace(boolean_prefix, ')', ''));
+                boolean_prefix := substring(
+                    normalized_policy_expression
+                    FROM 1 FOR or_operator_position - 1
+                );
+                or_operator_depth :=
+                    length(boolean_prefix)
+                    - length(replace(boolean_prefix, '(', ''))
+                    - length(boolean_prefix)
+                    + length(replace(boolean_prefix, ')', ''));
+            ELSE
+                and_operator_depth := -1;
+                or_operator_depth := -1;
+            END IF;
+        ELSE
+            and_operator_position := position(
+                ' and ' IN normalized_policy_expression
+            );
+            or_operator_position := position(
+                ' or ' IN normalized_policy_expression
+            );
+            and_operator_depth := NULL;
+            or_operator_depth := NULL;
+        END IF;
+
         IF actual_policy.polcmd <> 'r'::pg_catalog."char"
            OR NOT actual_policy.polpermissive
            OR NOT (
@@ -581,25 +669,20 @@ BEGIN
            )
            OR actual_policy.check_expr IS NOT NULL
            OR actual_policy.using_expr IS NULL
-           OR position(
-               policy_expectation.state_column
-               IN lower(actual_policy.using_expr)
-           ) = 0
-           OR position('published' IN lower(actual_policy.using_expr)) = 0
-           OR position(
-               'marketplace_party_id' IN lower(actual_policy.using_expr)
-           ) = 0
-           OR position(
-               'current_marketplace_party_id' IN lower(actual_policy.using_expr)
-           ) = 0
-           OR lower(actual_policy.using_expr) ~
-               '(^|[^[:alnum:]_])or[[:space:]]*[(]*[[:space:]]*true([^[:alnum:]_]|$)'
-           OR lower(actual_policy.using_expr) ~
-               '(^|[^[:alnum:]_])true[[:space:]]*[)]*[[:space:]]*or([^[:alnum:]_]|$)'
-           OR pg_catalog.regexp_count(
-               lower(actual_policy.using_expr),
-               '(^|[^[:alnum:]_])or([^[:alnum:]_]|$)'
-           ) <> 1
+           OR canonical_policy_expression IS DISTINCT FROM
+               policy_expectation.expected_canonical_expression
+           OR or_operator_position = 0
+           OR (
+               policy_expectation.is_product_child
+               AND (
+                   and_operator_position = 0
+                   OR or_operator_depth <= and_operator_depth
+               )
+           )
+           OR (
+               NOT policy_expectation.is_product_child
+               AND and_operator_position > 0
+           )
            OR position('is_admin' IN lower(actual_policy.using_expr)) > 0
            OR NOT EXISTS (
                SELECT 1
@@ -610,10 +693,16 @@ BEGIN
                  AND dependency.refobjid =
                      'public.current_marketplace_party_id()'::regprocedure
            )
-           OR position(
-               split_part(policy_expectation.state_type, '.', 2)
-               IN lower(actual_policy.using_expr)
-           ) = 0
+           OR NOT EXISTS (
+               SELECT 1
+               FROM pg_catalog.pg_depend AS dependency
+               WHERE dependency.classid = 'pg_catalog.pg_policy'::regclass
+                 AND dependency.objid = actual_policy.policy_oid
+                 AND dependency.refclassid = 'pg_catalog.pg_type'::regclass
+                 AND dependency.refobjid = pg_catalog.to_regtype(
+                     policy_expectation.expected_state_type
+                 )::oid
+           )
            OR EXISTS (
                SELECT 1
                FROM pg_catalog.pg_depend AS dependency
@@ -624,19 +713,13 @@ BEGIN
            )
            OR (
                policy_expectation.is_product_child
-               AND (
-                   position('exists' IN lower(actual_policy.using_expr)) = 0
-                   OR position('product_id' IN lower(actual_policy.using_expr)) = 0
-                   OR NOT EXISTS (
-                       SELECT 1
-                       FROM pg_catalog.pg_depend AS dependency
-                       WHERE dependency.classid =
-                           'pg_catalog.pg_policy'::regclass
-                         AND dependency.objid = actual_policy.policy_oid
-                         AND dependency.refclassid =
-                             'pg_catalog.pg_class'::regclass
-                         AND dependency.refobjid = 'public.product'::regclass
-                   )
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM pg_catalog.pg_depend AS dependency
+                   WHERE dependency.classid = 'pg_catalog.pg_policy'::regclass
+                     AND dependency.objid = actual_policy.policy_oid
+                     AND dependency.refclassid = 'pg_catalog.pg_class'::regclass
+                     AND dependency.refobjid = 'public.product'::regclass
                )
            )
         THEN
@@ -806,9 +889,129 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- The audit found table, sequence, and function entries only in public.
-    -- A global function row was absent, which is valid: PostgreSQL's hard-wired
-    -- default still gives PUBLIC EXECUTE and is revoked by a separate command.
+    -- The first audit hid non-public schema defaults. Compare the reviewed
+    -- Supabase-managed storage signature as an exact metadata set. Owner ACL
+    -- entries are intrinsic and excluded; every other storage grantee is part
+    -- of the comparison. MAINTAIN is metadata text here, so PostgreSQL 15 can
+    -- parse this block even though only PostgreSQL 17+ expects that row.
+    WITH expected_storage_signature(
+        owner_name,
+        schema_name,
+        object_type,
+        grantee_name,
+        privilege_type,
+        is_grantable
+    ) AS (
+        SELECT
+            'postgres'::name,
+            'storage'::name,
+            privilege.object_type,
+            grantee.grantee_name,
+            privilege.privilege_type,
+            false
+        FROM (VALUES
+            ('anon'::name),
+            ('authenticated'::name),
+            ('service_role'::name)
+        ) AS grantee(grantee_name)
+        CROSS JOIN (VALUES
+            ('r'::pg_catalog."char", 'SELECT'::text),
+            ('r'::pg_catalog."char", 'INSERT'::text),
+            ('r'::pg_catalog."char", 'UPDATE'::text),
+            ('r'::pg_catalog."char", 'DELETE'::text),
+            ('r'::pg_catalog."char", 'TRUNCATE'::text),
+            ('r'::pg_catalog."char", 'REFERENCES'::text),
+            ('r'::pg_catalog."char", 'TRIGGER'::text),
+            ('r'::pg_catalog."char", 'MAINTAIN'::text),
+            ('S'::pg_catalog."char", 'SELECT'::text),
+            ('S'::pg_catalog."char", 'UPDATE'::text),
+            ('S'::pg_catalog."char", 'USAGE'::text),
+            ('f'::pg_catalog."char", 'EXECUTE'::text)
+        ) AS privilege(object_type, privilege_type)
+        WHERE privilege.privilege_type <> 'MAINTAIN'
+           OR current_setting('server_version_num')::integer >= 170000
+    ),
+    actual_storage_signature AS (
+        SELECT
+            owner_role.rolname AS owner_name,
+            namespace.nspname AS schema_name,
+            defaults.defaclobjtype AS object_type,
+            CASE WHEN acl.grantee = 0 THEN 'PUBLIC'::name
+                ELSE grantee_role.rolname
+            END AS grantee_name,
+            acl.privilege_type,
+            acl.is_grantable
+        FROM pg_catalog.pg_default_acl AS defaults
+        JOIN pg_catalog.pg_roles AS owner_role
+            ON owner_role.oid = defaults.defaclrole
+        JOIN pg_catalog.pg_namespace AS namespace
+            ON namespace.oid = defaults.defaclnamespace
+        CROSS JOIN LATERAL pg_catalog.aclexplode(defaults.defaclacl) AS acl
+        LEFT JOIN pg_catalog.pg_roles AS grantee_role
+            ON grantee_role.oid = acl.grantee
+        WHERE namespace.nspname = 'storage'
+          AND acl.grantee <> defaults.defaclrole
+    ),
+    missing AS (
+        SELECT * FROM expected_storage_signature
+        EXCEPT
+        SELECT * FROM actual_storage_signature
+    ),
+    unexpected AS (
+        SELECT * FROM actual_storage_signature
+        EXCEPT
+        SELECT * FROM expected_storage_signature
+    )
+    SELECT
+        (
+            SELECT string_agg(
+                format(
+                    '%s:%s:%s:%s:%s:grantable=%s',
+                    owner_name,
+                    schema_name,
+                    object_type,
+                    grantee_name,
+                    privilege_type,
+                    is_grantable
+                ),
+                ', ' ORDER BY owner_name, schema_name, object_type,
+                grantee_name, privilege_type, is_grantable
+            )
+            FROM missing
+        ),
+        (
+            SELECT string_agg(
+                format(
+                    '%s:%s:%s:%s:%s:grantable=%s',
+                    owner_name,
+                    schema_name,
+                    object_type,
+                    grantee_name,
+                    privilege_type,
+                    is_grantable
+                ),
+                ', ' ORDER BY owner_name, schema_name, object_type,
+                grantee_name, privilege_type, is_grantable
+            )
+            FROM unexpected
+        )
+    INTO missing_tables, unexpected_tables;
+
+    IF missing_tables IS NOT NULL OR unexpected_tables IS NOT NULL THEN
+        RAISE EXCEPTION USING
+            MESSAGE = format(
+                'Phase 3.2B managed storage default-ACL signature drift; missing=[%s]; unexpected=[%s]',
+                COALESCE(missing_tables, 'none'),
+                COALESCE(unexpected_tables, 'none')
+            );
+    END IF;
+
+    -- Only these postgres-owned role scopes are reviewed: application-owned
+    -- public table/sequence/function defaults, the exact storage signature
+    -- above, and global function defaults. anon/authenticated are client roles;
+    -- service_role is a managed elevated server role. This catches global
+    -- table/sequence grants and every additional non-public schema instead of
+    -- excluding all of storage by name.
     IF EXISTS (
         SELECT 1
         FROM pg_catalog.pg_default_acl AS defaults
@@ -817,26 +1020,83 @@ BEGIN
         LEFT JOIN pg_catalog.pg_namespace AS namespace
             ON namespace.oid = defaults.defaclnamespace
         CROSS JOIN LATERAL pg_catalog.aclexplode(defaults.defaclacl) AS acl
-        LEFT JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = acl.grantee
+        LEFT JOIN pg_catalog.pg_roles AS grantee_role
+            ON grantee_role.oid = acl.grantee
         WHERE owner_role.rolname = 'postgres'
-          AND COALESCE(grantee.rolname, 'PUBLIC')
-              IN ('PUBLIC', 'anon', 'authenticated')
           AND (
-              defaults.defaclobjtype IN (
-                  'r'::pg_catalog."char",
-                  'S'::pg_catalog."char",
-                  'f'::pg_catalog."char"
+              acl.grantee = 0
+              OR grantee_role.rolname IN (
+                  'anon',
+                  'authenticated',
+                  'service_role'
               )
-              AND namespace.nspname IS DISTINCT FROM 'public'
-              AND NOT (
-                  defaults.defaclobjtype = 'f'::pg_catalog."char"
-                  AND defaults.defaclnamespace = 0
+          )
+          AND NOT (
+              (
+                  namespace.nspname IN ('public', 'storage')
+                  AND defaults.defaclobjtype IN (
+                      'r'::pg_catalog."char",
+                      'S'::pg_catalog."char",
+                      'f'::pg_catalog."char"
+                  )
+              )
+              OR (
+                  defaults.defaclnamespace = 0
+                  AND defaults.defaclobjtype = 'f'::pg_catalog."char"
               )
           )
     ) THEN
         RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2B postgres default-ACL namespace scope drift detected';
+            MESSAGE = 'Phase 3.2B unreviewed postgres role default-ACL scope detected';
     END IF;
+
+    -- Prove the reviewed storage schema-local function grants are effective
+    -- for both client roles and the managed elevated server role when combined
+    -- with the current global/hard-wired function defaults.
+    IF EXISTS (
+        SELECT 1
+        FROM (VALUES
+            (anon_role_oid),
+            (authenticated_role_oid),
+            (service_role_oid)
+        ) AS managed_storage_role(role_oid)
+        JOIN pg_catalog.pg_roles AS owner_role
+            ON owner_role.rolname = 'postgres'
+        JOIN pg_catalog.pg_namespace AS namespace
+            ON namespace.nspname = 'storage'
+        LEFT JOIN pg_catalog.pg_default_acl AS global_defaults
+            ON global_defaults.defaclrole = owner_role.oid
+           AND global_defaults.defaclobjtype = 'f'::pg_catalog."char"
+           AND global_defaults.defaclnamespace = 0
+        LEFT JOIN pg_catalog.pg_default_acl AS storage_defaults
+            ON storage_defaults.defaclrole = owner_role.oid
+           AND storage_defaults.defaclobjtype = 'f'::pg_catalog."char"
+           AND storage_defaults.defaclnamespace = namespace.oid
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM pg_catalog.aclexplode(
+                COALESCE(
+                    global_defaults.defaclacl,
+                    pg_catalog.acldefault(
+                        'f'::pg_catalog."char",
+                        owner_role.oid
+                    )
+                ) || COALESCE(
+                    storage_defaults.defaclacl,
+                    ARRAY[]::aclitem[]
+                )
+            ) AS acl
+            WHERE acl.grantee = managed_storage_role.role_oid
+              AND acl.privilege_type = 'EXECUTE'
+        )
+    ) THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2B managed storage function default EXECUTE is not effective';
+    END IF;
+
+    -- Public is application-controlled. A global function row was absent in
+    -- the reviewed input, which is valid because PostgreSQL's hard-wired
+    -- default supplies PUBLIC EXECUTE until the migration revokes it.
 
     FOR default_expectation IN
         SELECT *
@@ -1897,6 +2157,8 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
 REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated;
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres
 REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres
+GRANT EXECUTE ON FUNCTIONS TO service_role;
 
 -- Validate the resulting security state before commit. Any mismatch raises and
 -- rolls the entire migration back; this is intentionally independent of the
@@ -1964,6 +2226,13 @@ DECLARE
     helper_row record;
     expected_source text;
     actual_source text;
+    normalized_policy_expression text;
+    canonical_policy_expression text;
+    boolean_prefix text;
+    and_operator_position integer;
+    or_operator_position integer;
+    and_operator_depth integer;
+    or_operator_depth integer;
     missing_tables text;
     unexpected_tables text;
 BEGIN
@@ -1975,6 +2244,19 @@ BEGIN
     FROM pg_catalog.pg_roles WHERE rolname = 'service_role';
     SELECT oid INTO STRICT postgres_role_oid
     FROM pg_catalog.pg_roles WHERE rolname = 'postgres';
+
+    IF pg_catalog.pg_has_role(
+        anon_role_oid,
+        service_role_oid,
+        'MEMBER'
+    ) OR pg_catalog.pg_has_role(
+        authenticated_role_oid,
+        service_role_oid,
+        'MEMBER'
+    ) THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2B postflight: client role inherits or can assume service_role';
+    END IF;
 
     WITH expected(table_name) AS (
         SELECT unnest(expected_tables)
@@ -2041,14 +2323,24 @@ BEGIN
         FROM pg_catalog.pg_class AS relation
         WHERE relation.relnamespace = 'public'::regnamespace
           AND relation.relkind IN ('r', 'p')
+           AND pg_catalog.has_table_privilege(
+               anon_role_oid,
+               relation.oid,
+               'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER'
+           )
+    ) OR EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_class AS relation
+        WHERE relation.relnamespace = 'public'::regnamespace
+          AND relation.relkind IN ('r', 'p')
           AND pg_catalog.has_table_privilege(
-              anon_role_oid,
+              authenticated_role_oid,
               relation.oid,
-              'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER'
+              'TRUNCATE, REFERENCES, TRIGGER'
           )
     ) THEN
         RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2B postflight: dangerous PUBLIC or anon privilege remains';
+            MESSAGE = 'Phase 3.2B postflight: dangerous PUBLIC, anon, or authenticated privilege remains';
     END IF;
 
     -- MAINTAIN is unknown to PostgreSQL 15/16. A nested IF prevents the
@@ -2240,50 +2532,50 @@ BEGIN
             (
                 'custom_offering'::name,
                 'custom_offering_select_published_or_own'::name,
-                'publication_state'::text,
+                $canonical$publication_state='published'::custom_offering_stateormarketplace_party_id=current_marketplace_party_id$canonical$::text,
                 'public.custom_offering_state'::text,
                 false
             ),
             (
                 'product'::name,
                 'product_select_published_or_own'::name,
-                'lifecycle_state'::text,
+                $canonical$lifecycle_state='published'::product_stateormarketplace_party_id=current_marketplace_party_id$canonical$::text,
                 'public.product_state'::text,
                 false
             ),
             (
                 'product_color'::name,
                 'product_color_select'::name,
-                'lifecycle_state'::text,
+                $canonical$existsselect1fromproductwhereid=product_idandlifecycle_state='published'::product_stateormarketplace_party_id=current_marketplace_party_id$canonical$::text,
                 'public.product_state'::text,
                 true
             ),
             (
                 'product_image'::name,
                 'product_image_select'::name,
-                'lifecycle_state'::text,
+                $canonical$existsselect1fromproductwhereid=product_idandlifecycle_state='published'::product_stateormarketplace_party_id=current_marketplace_party_id$canonical$::text,
                 'public.product_state'::text,
                 true
             ),
             (
                 'product_3d_model'::name,
                 'product_3d_model_select'::name,
-                'lifecycle_state'::text,
+                $canonical$existsselect1fromproductwhereid=product_idandlifecycle_state='published'::product_stateormarketplace_party_id=current_marketplace_party_id$canonical$::text,
                 'public.product_state'::text,
                 true
             ),
             (
                 'product_enrichment_assignment'::name,
                 'product_enrichment_assignment_select'::name,
-                'lifecycle_state'::text,
+                $canonical$existsselect1fromproductwhereid=product_idandlifecycle_state='published'::product_stateormarketplace_party_id=current_marketplace_party_id$canonical$::text,
                 'public.product_state'::text,
                 true
             )
         ) AS expected(
             table_name,
             policy_name,
-            state_column,
-            state_type,
+            expected_canonical_expression,
+            expected_state_type,
             is_product_child
         )
     LOOP
@@ -2303,6 +2595,74 @@ BEGIN
           AND relation.relname = policy_expectation.table_name
           AND policy.polname = policy_expectation.policy_name;
 
+        normalized_policy_expression := pg_catalog.regexp_replace(
+            lower(policy_row.using_expr),
+            '[[:space:]]+',
+            ' ',
+            'g'
+        );
+        canonical_policy_expression := normalized_policy_expression;
+        IF policy_expectation.is_product_child THEN
+            canonical_policy_expression := pg_catalog.regexp_replace(
+                canonical_policy_expression,
+                'from[[:space:]]+(public\.)?product([[:space:]]+as)?[[:space:]]+[a-z_][a-z0-9_]*[[:space:]]+where',
+                'from product where',
+                'g'
+            );
+        END IF;
+        canonical_policy_expression := pg_catalog.regexp_replace(
+            canonical_policy_expression,
+            '\m[a-z_][a-z0-9_]*\.',
+            '',
+            'g'
+        );
+        canonical_policy_expression := pg_catalog.regexp_replace(
+            canonical_policy_expression,
+            '[[:space:]()]',
+            '',
+            'g'
+        );
+        IF policy_expectation.is_product_child THEN
+            and_operator_position := position(
+                ' and ' IN normalized_policy_expression
+            );
+            or_operator_position := position(
+                ' or ' IN normalized_policy_expression
+            );
+            IF and_operator_position > 0 AND or_operator_position > 0 THEN
+                boolean_prefix := substring(
+                    normalized_policy_expression
+                    FROM 1 FOR and_operator_position - 1
+                );
+                and_operator_depth :=
+                    length(boolean_prefix)
+                    - length(replace(boolean_prefix, '(', ''))
+                    - length(boolean_prefix)
+                    + length(replace(boolean_prefix, ')', ''));
+                boolean_prefix := substring(
+                    normalized_policy_expression
+                    FROM 1 FOR or_operator_position - 1
+                );
+                or_operator_depth :=
+                    length(boolean_prefix)
+                    - length(replace(boolean_prefix, '(', ''))
+                    - length(boolean_prefix)
+                    + length(replace(boolean_prefix, ')', ''));
+            ELSE
+                and_operator_depth := -1;
+                or_operator_depth := -1;
+            END IF;
+        ELSE
+            and_operator_position := position(
+                ' and ' IN normalized_policy_expression
+            );
+            or_operator_position := position(
+                ' or ' IN normalized_policy_expression
+            );
+            and_operator_depth := NULL;
+            or_operator_depth := NULL;
+        END IF;
+
         IF policy_row.polcmd <> 'r'::pg_catalog."char"
            OR NOT policy_row.polpermissive
            OR NOT (
@@ -2311,24 +2671,20 @@ BEGIN
            )
            OR policy_row.check_expr IS NOT NULL
            OR policy_row.using_expr IS NULL
-           OR position(
-               policy_expectation.state_column IN lower(policy_row.using_expr)
-           ) = 0
-           OR position('published' IN lower(policy_row.using_expr)) = 0
-           OR position(
-               'marketplace_party_id' IN lower(policy_row.using_expr)
-           ) = 0
-           OR position(
-               'current_marketplace_party_id' IN lower(policy_row.using_expr)
-           ) = 0
-           OR lower(policy_row.using_expr) ~
-               '(^|[^[:alnum:]_])or[[:space:]]*[(]*[[:space:]]*true([^[:alnum:]_]|$)'
-           OR lower(policy_row.using_expr) ~
-               '(^|[^[:alnum:]_])true[[:space:]]*[)]*[[:space:]]*or([^[:alnum:]_]|$)'
-           OR pg_catalog.regexp_count(
-               lower(policy_row.using_expr),
-               '(^|[^[:alnum:]_])or([^[:alnum:]_]|$)'
-           ) <> 1
+           OR canonical_policy_expression IS DISTINCT FROM
+               policy_expectation.expected_canonical_expression
+           OR or_operator_position = 0
+           OR (
+               policy_expectation.is_product_child
+               AND (
+                   and_operator_position = 0
+                   OR or_operator_depth <= and_operator_depth
+               )
+           )
+           OR (
+               NOT policy_expectation.is_product_child
+               AND and_operator_position > 0
+           )
            OR position('is_admin' IN lower(policy_row.using_expr)) > 0
            OR NOT EXISTS (
                SELECT 1
@@ -2339,10 +2695,16 @@ BEGIN
                  AND dependency.refobjid =
                      'public.current_marketplace_party_id()'::regprocedure
            )
-           OR position(
-               split_part(policy_expectation.state_type, '.', 2)
-               IN lower(policy_row.using_expr)
-           ) = 0
+           OR NOT EXISTS (
+               SELECT 1
+               FROM pg_catalog.pg_depend AS dependency
+               WHERE dependency.classid = 'pg_catalog.pg_policy'::regclass
+                 AND dependency.objid = policy_row.policy_oid
+                 AND dependency.refclassid = 'pg_catalog.pg_type'::regclass
+                 AND dependency.refobjid = pg_catalog.to_regtype(
+                     policy_expectation.expected_state_type
+                 )::oid
+           )
            OR EXISTS (
                SELECT 1
                FROM pg_catalog.pg_depend AS dependency
@@ -2353,19 +2715,13 @@ BEGIN
            )
            OR (
                policy_expectation.is_product_child
-               AND (
-                   position('exists' IN lower(policy_row.using_expr)) = 0
-                   OR position('product_id' IN lower(policy_row.using_expr)) = 0
-                   OR NOT EXISTS (
-                       SELECT 1
-                       FROM pg_catalog.pg_depend AS dependency
-                       WHERE dependency.classid =
-                           'pg_catalog.pg_policy'::regclass
-                         AND dependency.objid = policy_row.policy_oid
-                         AND dependency.refclassid =
-                             'pg_catalog.pg_class'::regclass
-                         AND dependency.refobjid = 'public.product'::regclass
-                   )
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM pg_catalog.pg_depend AS dependency
+                   WHERE dependency.classid = 'pg_catalog.pg_policy'::regclass
+                     AND dependency.objid = policy_row.policy_oid
+                     AND dependency.refclassid = 'pg_catalog.pg_class'::regclass
+                     AND dependency.refobjid = 'public.product'::regclass
                )
            )
         THEN
@@ -2678,6 +3034,163 @@ BEGIN
             MESSAGE = 'Phase 3.2B postflight: anon helper dependency remains';
     END IF;
 
+    -- The core migration never targets storage. Recheck its complete reviewed
+    -- non-owner default-ACL signature before COMMIT so global function-default
+    -- hardening cannot silently remove or broaden managed access.
+    IF EXISTS (
+        WITH expected_storage_signature(
+            owner_name,
+            schema_name,
+            object_type,
+            grantee_name,
+            privilege_type,
+            is_grantable
+        ) AS (
+            SELECT
+                'postgres'::name,
+                'storage'::name,
+                privilege.object_type,
+                grantee.grantee_name,
+                privilege.privilege_type,
+                false
+            FROM (VALUES
+                ('anon'::name),
+                ('authenticated'::name),
+                ('service_role'::name)
+            ) AS grantee(grantee_name)
+            CROSS JOIN (VALUES
+                ('r'::pg_catalog."char", 'SELECT'::text),
+                ('r'::pg_catalog."char", 'INSERT'::text),
+                ('r'::pg_catalog."char", 'UPDATE'::text),
+                ('r'::pg_catalog."char", 'DELETE'::text),
+                ('r'::pg_catalog."char", 'TRUNCATE'::text),
+                ('r'::pg_catalog."char", 'REFERENCES'::text),
+                ('r'::pg_catalog."char", 'TRIGGER'::text),
+                ('r'::pg_catalog."char", 'MAINTAIN'::text),
+                ('S'::pg_catalog."char", 'SELECT'::text),
+                ('S'::pg_catalog."char", 'UPDATE'::text),
+                ('S'::pg_catalog."char", 'USAGE'::text),
+                ('f'::pg_catalog."char", 'EXECUTE'::text)
+            ) AS privilege(object_type, privilege_type)
+            WHERE privilege.privilege_type <> 'MAINTAIN'
+               OR current_setting('server_version_num')::integer >= 170000
+        ),
+        actual_storage_signature AS (
+            SELECT
+                owner_role.rolname AS owner_name,
+                namespace.nspname AS schema_name,
+                defaults.defaclobjtype AS object_type,
+                CASE WHEN acl.grantee = 0 THEN 'PUBLIC'::name
+                    ELSE grantee_role.rolname
+                END AS grantee_name,
+                acl.privilege_type,
+                acl.is_grantable
+            FROM pg_catalog.pg_default_acl AS defaults
+            JOIN pg_catalog.pg_roles AS owner_role
+                ON owner_role.oid = defaults.defaclrole
+            JOIN pg_catalog.pg_namespace AS namespace
+                ON namespace.oid = defaults.defaclnamespace
+            CROSS JOIN LATERAL pg_catalog.aclexplode(defaults.defaclacl) AS acl
+            LEFT JOIN pg_catalog.pg_roles AS grantee_role
+                ON grantee_role.oid = acl.grantee
+            WHERE namespace.nspname = 'storage'
+              AND acl.grantee <> defaults.defaclrole
+        )
+        (
+            SELECT * FROM expected_storage_signature
+            EXCEPT
+            SELECT * FROM actual_storage_signature
+        )
+        UNION ALL
+        (
+            SELECT * FROM actual_storage_signature
+            EXCEPT
+            SELECT * FROM expected_storage_signature
+        )
+    ) THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2B postflight: managed storage default-ACL signature drift';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_default_acl AS defaults
+        JOIN pg_catalog.pg_roles AS owner_role
+            ON owner_role.oid = defaults.defaclrole
+        LEFT JOIN pg_catalog.pg_namespace AS namespace
+            ON namespace.oid = defaults.defaclnamespace
+        CROSS JOIN LATERAL pg_catalog.aclexplode(defaults.defaclacl) AS acl
+        LEFT JOIN pg_catalog.pg_roles AS grantee_role
+            ON grantee_role.oid = acl.grantee
+        WHERE owner_role.rolname = 'postgres'
+          AND (
+              acl.grantee = 0
+              OR grantee_role.rolname IN (
+                  'anon',
+                  'authenticated',
+                  'service_role'
+              )
+          )
+          AND NOT (
+              (
+                  namespace.nspname IN ('public', 'storage')
+                  AND defaults.defaclobjtype IN (
+                      'r'::pg_catalog."char",
+                      'S'::pg_catalog."char",
+                      'f'::pg_catalog."char"
+                  )
+              )
+              OR (
+                  defaults.defaclnamespace = 0
+                  AND defaults.defaclobjtype = 'f'::pg_catalog."char"
+              )
+          )
+    ) THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2B postflight: unreviewed postgres role default-ACL scope';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM (VALUES
+            (anon_role_oid),
+            (authenticated_role_oid),
+            (service_role_oid)
+        ) AS managed_storage_role(role_oid)
+        JOIN pg_catalog.pg_roles AS owner_role
+            ON owner_role.rolname = 'postgres'
+        JOIN pg_catalog.pg_namespace AS namespace
+            ON namespace.nspname = 'storage'
+        LEFT JOIN pg_catalog.pg_default_acl AS global_defaults
+            ON global_defaults.defaclrole = owner_role.oid
+           AND global_defaults.defaclobjtype = 'f'::pg_catalog."char"
+           AND global_defaults.defaclnamespace = 0
+        LEFT JOIN pg_catalog.pg_default_acl AS storage_defaults
+            ON storage_defaults.defaclrole = owner_role.oid
+           AND storage_defaults.defaclobjtype = 'f'::pg_catalog."char"
+           AND storage_defaults.defaclnamespace = namespace.oid
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM pg_catalog.aclexplode(
+                COALESCE(
+                    global_defaults.defaclacl,
+                    pg_catalog.acldefault(
+                        'f'::pg_catalog."char",
+                        owner_role.oid
+                    )
+                ) || COALESCE(
+                    storage_defaults.defaclacl,
+                    ARRAY[]::aclitem[]
+                )
+            ) AS acl
+            WHERE acl.grantee = managed_storage_role.role_oid
+              AND acl.privilege_type = 'EXECUTE'
+        )
+    ) THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2B postflight: managed storage function default EXECUTE is not effective';
+    END IF;
+
     -- Compute effective defaults. A missing global row means acldefault(); a
     -- missing schema row contributes nothing. Public-schema defaults are added
     -- to global defaults, exactly as PostgreSQL applies them to future objects.
@@ -2741,9 +3254,18 @@ BEGIN
                 )
             END
         ) AS acl
-        LEFT JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = acl.grantee
-        WHERE COALESCE(grantee.rolname, 'PUBLIC')
-            IN ('PUBLIC', 'anon', 'authenticated')
+        WHERE CASE
+            WHEN acl.grantee = 0 THEN true
+            ELSE pg_catalog.pg_has_role(
+                anon_role_oid,
+                acl.grantee,
+                'USAGE'
+            ) OR pg_catalog.pg_has_role(
+                authenticated_role_oid,
+                acl.grantee,
+                'USAGE'
+            )
+        END
           AND (
               expected.catalog_object_type IN (
                   'r'::pg_catalog."char",
@@ -2754,6 +3276,49 @@ BEGIN
     ) THEN
         RAISE EXCEPTION USING
             MESSAGE = 'Phase 3.2B postflight: unsafe effective postgres default privilege';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM (VALUES
+            ('public_functions'::text, 'public'::name),
+            ('global_functions'::text, NULL::name)
+        ) AS expected(scope_name, schema_name)
+        LEFT JOIN pg_catalog.pg_namespace AS namespace
+            ON namespace.nspname = expected.schema_name
+        LEFT JOIN pg_catalog.pg_default_acl AS global_defaults
+            ON global_defaults.defaclrole = postgres_role_oid
+           AND global_defaults.defaclobjtype = 'f'::pg_catalog."char"
+           AND global_defaults.defaclnamespace = 0
+        LEFT JOIN pg_catalog.pg_default_acl AS schema_defaults
+            ON schema_defaults.defaclrole = postgres_role_oid
+           AND schema_defaults.defaclobjtype = 'f'::pg_catalog."char"
+           AND schema_defaults.defaclnamespace = namespace.oid
+           AND expected.schema_name IS NOT NULL
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM pg_catalog.aclexplode(
+                COALESCE(
+                    global_defaults.defaclacl,
+                    pg_catalog.acldefault(
+                        'f'::pg_catalog."char",
+                        postgres_role_oid
+                    )
+                ) || CASE
+                    WHEN expected.schema_name IS NULL
+                    THEN ARRAY[]::aclitem[]
+                    ELSE COALESCE(
+                        schema_defaults.defaclacl,
+                        ARRAY[]::aclitem[]
+                    )
+                END
+            ) AS acl
+            WHERE acl.grantee = service_role_oid
+              AND acl.privilege_type = 'EXECUTE'
+        )
+    ) THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2B postflight: explicit service_role future-function EXECUTE missing';
     END IF;
 END
 $phase32b_postflight$;

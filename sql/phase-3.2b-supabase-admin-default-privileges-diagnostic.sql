@@ -3,6 +3,11 @@ Phase 3.2B managed-role default-privilege diagnostic.
 
 READ ONLY. Run and review this metadata in staging before considering the
 separate optional supabase_admin migration. It does not read application rows.
+The default-ACL rowset deliberately has no owner, namespace, object-type, or
+grantee filter: PUBLIC, anon, authenticated, service_role, and any unexpected
+role remain visible. service_role is a managed elevated server role, not a
+client role. The authority and effective-scope rows remain specific to the
+separate optional supabase_admin migration.
 */
 
 WITH default_acl AS (
@@ -28,17 +33,21 @@ WITH default_acl AS (
         ON namespace.oid = defaults.defaclnamespace
     CROSS JOIN LATERAL pg_catalog.aclexplode(defaults.defaclacl) AS acl
     LEFT JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = acl.grantee
-    WHERE owner_role.rolname = 'supabase_admin'
-      AND defaults.defaclobjtype IN (
-          'r'::pg_catalog."char",
-          'S'::pg_catalog."char",
-          'f'::pg_catalog."char"
-      )
 ),
 managed_role AS (
     SELECT oid
     FROM pg_catalog.pg_roles
     WHERE rolname = 'supabase_admin'
+),
+resolved_roles AS (
+    SELECT
+        (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = 'anon') AS anon_oid,
+        (
+            SELECT oid FROM pg_catalog.pg_roles WHERE rolname = 'authenticated'
+        ) AS authenticated_oid,
+        (
+            SELECT oid FROM pg_catalog.pg_roles WHERE rolname = 'service_role'
+        ) AS service_role_oid
 ),
 expected_scopes(
     scope_name,
@@ -57,6 +66,19 @@ effective_scopes AS (
         expected.scope_name,
         expected.schema_name,
         expected.catalog_object_type AS object_type,
+        roles.anon_oid IS NOT NULL
+            AND roles.authenticated_oid IS NOT NULL
+            AND roles.service_role_oid IS NOT NULL
+            AND NOT pg_catalog.pg_has_role(
+                roles.anon_oid,
+                roles.service_role_oid,
+                'MEMBER'
+            )
+            AND NOT pg_catalog.pg_has_role(
+                roles.authenticated_oid,
+                roles.service_role_oid,
+                'MEMBER'
+            ) AS client_roles_separate,
         NOT EXISTS (
             SELECT 1
             FROM pg_catalog.aclexplode(
@@ -75,10 +97,18 @@ effective_scopes AS (
                     )
                 END
             ) AS acl
-            LEFT JOIN pg_catalog.pg_roles AS grantee
-                ON grantee.oid = acl.grantee
-            WHERE COALESCE(grantee.rolname, 'PUBLIC')
-                IN ('PUBLIC', 'anon', 'authenticated')
+            WHERE CASE
+                WHEN acl.grantee = 0 THEN true
+                ELSE pg_catalog.pg_has_role(
+                    roles.anon_oid,
+                    acl.grantee,
+                    'USAGE'
+                ) OR pg_catalog.pg_has_role(
+                    roles.authenticated_oid,
+                    acl.grantee,
+                    'USAGE'
+                )
+            END
               AND (
                    expected.catalog_object_type IN (
                       'r'::pg_catalog."char",
@@ -86,7 +116,30 @@ effective_scopes AS (
                   )
                   OR acl.privilege_type = 'EXECUTE'
               )
-        ) AS check_passed
+        ) AS no_effective_client_default,
+        expected.catalog_object_type = 'f'::pg_catalog."char"
+            AS service_role_execute_expected,
+        EXISTS (
+            SELECT 1
+            FROM pg_catalog.aclexplode(
+                COALESCE(
+                    global_defaults.defaclacl,
+                    pg_catalog.acldefault(
+                        expected.acldefault_object_type,
+                        owner.oid
+                    )
+                ) || CASE
+                    WHEN expected.schema_name IS NULL
+                    THEN ARRAY[]::aclitem[]
+                    ELSE COALESCE(
+                        schema_defaults.defaclacl,
+                        ARRAY[]::aclitem[]
+                    )
+                END
+            ) AS acl
+            WHERE acl.grantee = roles.service_role_oid
+              AND acl.privilege_type = 'EXECUTE'
+        ) AS service_role_execute_effective
     FROM expected_scopes AS expected
     CROSS JOIN managed_role AS owner
     LEFT JOIN pg_catalog.pg_namespace AS namespace
@@ -100,6 +153,7 @@ effective_scopes AS (
        AND schema_defaults.defaclobjtype = expected.catalog_object_type
        AND schema_defaults.defaclnamespace = namespace.oid
        AND expected.schema_name IS NOT NULL
+    CROSS JOIN resolved_roles AS roles
 ),
 authority AS (
     SELECT
@@ -130,6 +184,10 @@ SELECT
     NULL::name AS deployment_role,
     NULL::boolean AS supabase_admin_present,
     NULL::boolean AS can_alter_supabase_admin_defaults,
+    NULL::boolean AS client_roles_separate,
+    NULL::boolean AS no_effective_client_default,
+    NULL::boolean AS service_role_execute_expected,
+    NULL::boolean AS service_role_execute_effective,
     NULL::boolean AS check_passed
 FROM default_acl AS defaults
 UNION ALL
@@ -144,6 +202,10 @@ SELECT
     authority.deployment_role,
     authority.supabase_admin_present,
     authority.can_alter_supabase_admin_defaults,
+    NULL::boolean,
+    NULL::boolean,
+    NULL::boolean,
+    NULL::boolean,
     NULL::boolean
 FROM authority
 UNION ALL
@@ -158,6 +220,15 @@ SELECT
     NULL::name,
     true,
     NULL::boolean,
-    effective.check_passed
+    effective.client_roles_separate,
+    effective.no_effective_client_default,
+    effective.service_role_execute_expected,
+    effective.service_role_execute_effective,
+    effective.client_roles_separate
+        AND effective.no_effective_client_default
+        AND (
+            NOT effective.service_role_execute_expected
+            OR effective.service_role_execute_effective
+        )
 FROM effective_scopes AS effective
 ORDER BY record_type, schema_scope, object_type, grantee_name, privilege_type;

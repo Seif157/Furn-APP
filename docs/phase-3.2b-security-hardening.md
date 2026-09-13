@@ -14,7 +14,8 @@ The package contains:
   verification, including a final section summary.
 - `sql/phase-3.2b-helper-function-definitions.sql`: read-only helper diagnostic.
 - `sql/phase-3.2b-supabase-admin-default-privileges-diagnostic.sql`: read-only
-  managed-role default-ACL and authority diagnostic.
+  all-owner/all-namespace default-ACL inventory plus managed-role authority and
+  effective-scope diagnostic.
 - `sql/phase-3.2b-supabase-admin-default-privileges-optional.sql`: isolated,
   optional managed-role migration. It must not be bundled with the core change.
 
@@ -38,10 +39,30 @@ The package contains:
 - **High - future defaults:** postgres and the managed `supabase_admin` role had
   client-facing default privileges. Their scopes and operational ownership must
   be handled separately.
+- **High - audit scope blind spot:** the original Phase 3.2A Section 07 query
+  reported only `public` and global default ACLs, concealing postgres-owned
+  Supabase-managed `storage` defaults. Section 07 now reports every namespace.
 
 All 34 public base tables have RLS enabled and at least one policy. None has
 FORCE RLS. Nineteen unrelated policies use `FOR ALL`; their operation-specific
 semantics remain deferred to Phase 3.2C.
+
+The first revised live standalone preflight stopped safely before migration
+changes on the former postgres default-ACL namespace assumption. Its initial
+metadata-only follow-up was incomplete because it filtered grantees to PUBLIC,
+`anon`, and `authenticated`, concealing `service_role`. A second live preflight
+then stopped safely on the exact-signature comparison and exposed twelve
+additional non-grantable `service_role` rows.
+
+The complete reviewed managed `storage` signature has the same privileges for
+three roles: `anon`, `authenticated`, and `service_role`. For each role it has
+table SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER (plus MAINTAIN on
+supporting PostgreSQL versions), sequence SELECT/UPDATE/USAGE, and function
+EXECUTE. Every row is owned by `postgres`, scoped to `storage`, and not
+grantable. No PUBLIC storage entry was observed. `anon` and `authenticated` are
+client roles. `service_role` is a managed elevated server role that bypasses
+RLS and must remain server-only. Neither migration nor another live preflight
+was run as part of this correction.
 
 ## Fail-closed preflight
 
@@ -63,9 +84,12 @@ statement. It verifies:
   pre-migration SELECT grantees.
 - The exact names, table identities, SELECT command, permissive mode, roles,
   absence of `WITH CHECK`, expected relation/function dependencies, and
-  critical predicate ingredients for the six mixed policies being narrowed.
-  It rejects helper drift, an unexpected admin dependency, and Boolean
-  broadening such as `OR true`.
+  complete Boolean and operator semantics for the six mixed policies being
+  narrowed. The comparison permits reconstructed qualification and relation
+  aliases, but requires the exact reviewed columns, equality operators, helper
+  call, parent join, state predicates, branches, and child grouping. It rejects
+  negation, changed operators, extra `AND`/`OR` branches, tautologies, helper
+  drift, and an unexpected admin dependency.
 - The absence of prior `phase32b_` policy artifacts.
 - A separate applicable permissive authenticated seller-write policy for every
   child write operation that receives a restrictive guard.
@@ -74,9 +98,18 @@ statement. It verifies:
   comparison lowercases and removes all whitespace, so harmless formatting
   differences pass while removing `a.is_active` or the approved-state test does
   not.
-- The audited postgres-owned default ACLs: public-schema table, sequence, and
-  function entries. A global function row was not present and is not required
-  by preflight.
+- The audited postgres-owned default ACL model: application-controlled public
+  table, sequence, and function scopes; the global function scope; and the exact
+  reviewed Supabase-managed storage signature. Bidirectional `EXCEPT` rejects
+  missing or extra storage rows, owners, grantees, privileges, object types,
+  grant options, and schemas. A separate scope check rejects global table or
+  sequence grants for the reviewed roles and every additional non-public
+  namespace.
+- Effective storage function EXECUTE for `anon`, `authenticated`, and the
+  separately classified managed elevated server role `service_role` before
+  global function-default hardening. MAINTAIN is expected for all three roles
+  only when `server_version_num >= 170000`; it is compared as metadata text so
+  the preflight remains PostgreSQL-15-safe.
 - The executor's authority for postgres-owned operations. Core deployment does
   not require or assume authority over `supabase_admin`.
 
@@ -153,13 +186,14 @@ Authenticated access therefore also depends on grants and RLS for
 
 ## Explicit public and owner policy split
 
-The migration does not use regular-expression replacement of `pg_get_expr()` to
-generate or validate a policy. PostgreSQL reconstructs that text and may change
-parentheses, aliases, and qualification, so whitespace-only textual equality is
-not a reliable drift check. Preflight instead verifies policy metadata,
-dependencies, critical predicate ingredients, and the absence of Boolean
-broadening. Each `ALTER POLICY` still explicitly reinstalls its complete
-reviewed `USING` predicate while narrowing it to authenticated:
+The migration never uses reconstructed `pg_get_expr()` text to generate a
+policy and does not compare it with a handcrafted expression using
+whitespace-only equality. PostgreSQL may reconstruct parentheses, aliases, and
+qualification differently. Preflight instead canonicalizes only those
+non-semantic variations, compares the complete reviewed column/operator/helper
+shape, independently checks Boolean grouping and catalog dependencies, and
+rejects any additional branch. Each `ALTER POLICY` still explicitly reinstalls
+its complete reviewed `USING` predicate while narrowing it to authenticated:
 
 - `custom_offering.custom_offering_select_published_or_own`
 - `product.product_select_published_or_own`
@@ -227,10 +261,17 @@ checks compare each complete hardened body, not only selected tokens.
 
 ## Default privileges and managed-role separation
 
-The live Section 07 audit reported table, sequence, and function default-ACL
-rows in `public` for both `postgres` and `supabase_admin`; it reported no global
-function row. The core migration changes only the confirmed postgres-owned
-scopes:
+The original Section 07 output reported table, sequence, and function
+default-ACL rows in `public` for both `postgres` and `supabase_admin`, with no
+global function row. That query concealed non-public schema rows. The first
+focused diagnostic then introduced a second blind spot by filtering grantees
+and omitting `service_role`. The corrected all-namespace audit and diagnostics
+do not filter grantees, so PUBLIC, `anon`, `authenticated`, `service_role`, and
+any unexpected additional role remain visible. The second live preflight
+established the complete postgres-owned Supabase-managed `storage` signature
+described above.
+
+The core migration changes only application-controlled postgres scopes:
 
 - Table and sequence defaults are revoked from PUBLIC, anon, and authenticated
   only `IN SCHEMA public`.
@@ -240,20 +281,39 @@ scopes:
   authenticated. PostgreSQL grants PUBLIC function EXECUTE from its hard-wired
   global default even when no global `pg_default_acl` row exists; a schema-local
   revoke cannot subtract that global grant.
-- Service-role defaults are not changed.
+- The global revoke applies to functions created by `postgres` in every schema,
+  not just `public`. The migration therefore explicitly grants future-function
+  EXECUTE to `service_role` at the same global scope. Preflight and postflight
+  require that neither client role inherits or can assume `service_role`, so
+  this preservation cannot become an indirect client bypass.
+- No DDL or DCL targets `storage`. Its default ACLs, objects, policies,
+  functions, sequences, and ownership remain untouched. Exact preflight and
+  postflight comparisons prove its reviewed schema-local entries remain
+  unchanged for all three expected roles, and effective-ACL checks prove their
+  storage function EXECUTE survives the global function-default revoke.
+- `service_role` is not a client role and is not protected by RLS. It is a
+  managed elevated server role that must remain confined to trusted server-side
+  use. Phase 3.2B continues to prove that neither client role inherits or can
+  assume it.
 
 The internal `supabase_admin` defaults are **not fixed by the core migration**.
 They are intentionally separated so a lack of managed-role authority cannot
 block the critical existing-object fixes.
 
 Run the read-only managed-role diagnostic and have a reviewer confirm every
-namespace, object type, grantee, privilege, authority result, and four-scope
-effective-privilege result. The optional migration accepts the audited
+owner, namespace, object type, grantee, privilege, authority result, and
+four-scope effective-privilege result. Its default-ACL inventory has no filters;
+the authority and effective-scope rows remain specific to `supabase_admin`. The
+optional migration accepts the audited
 public-schema table, sequence, and function entries; it does not require a
 pre-existing global function row. It applies separate schema-local and global
-function revokes and has its own transactional postflight. It must pass a new
-human review and live preflight confirmation before staging consideration. Do
-not weaken its preflight or combine it with the core migration.
+function revokes, explicitly preserves global future-function EXECUTE for
+`service_role`, verifies client-role separation, and has its own transactional
+postflight. Because that global grant affects functions later created by
+`supabase_admin` in every schema, its scope must be reviewed explicitly. It must
+pass a new human review and live preflight confirmation before staging
+consideration. Do not weaken its preflight or combine it with the core
+migration.
 
 Effective default-ACL calculations deliberately use PostgreSQL's two different
 sequence codes: uppercase `S` for `pg_default_acl.defaclobjtype`, and lowercase
@@ -286,18 +346,30 @@ It reads metadata only.
 8. No anonymous policy dependency on restricted helpers.
 9. No dangerous PUBLIC, anon, or authenticated existing-object grants.
 10. Exact 34-table inventory and 12-table anon SELECT classification.
-11. Four effective postgres-owned future-object scopes: public tables, public
+11. Four effective application-controlled postgres-owned future-object scopes:
+    public tables, public
     sequences, public functions, and global functions. Missing safe catalog rows
-    are accepted; schema-local defaults are combined with global defaults.
-12. Every reviewed RLS table still has at least one policy.
-13. One summary row per verification section with expected, actual, failed, and
-    pass counts.
+    are accepted; schema-local defaults are combined with global defaults,
+    client inheritance is accounted for, and explicit future-function EXECUTE
+    for `service_role` is required without client inheritance of that role.
+12. Every reviewed public RLS table still has at least one policy.
+13. `managed_storage_default_acl_signature`: exact version-aware storage rows,
+    bidirectional missing/unexpected detection for `anon`, `authenticated`, and
+    the managed elevated server role `service_role`; effective storage function
+    EXECUTE for all three; and rejection of every other non-public role-default
+    scope. Expected signature counts are 33 rows before PostgreSQL 17 and 36
+    rows on PostgreSQL 17 or newer.
+14. One summary row per verification section with expected, actual, failed, and
+    pass counts. Its domain field separates core application checks from
+    reviewed managed-storage metadata, while its optional-package field states
+    that `supabase_admin` defaults require the separate diagnostic.
 
 Sections 3 through 6 start from explicit `VALUES` expectations and `LEFT JOIN`
 actual metadata. A missing expected policy or view therefore remains visible as
 `object_present = false`, `check_passed = false`, and a specific finding code.
-The final summary expects four Section 11 results and is safe only when every row
-has `failed_count = 0` and `check_passed = true`.
+The final summary expects four Section 11 results and one Section 13 storage
+result. It is safe only when every row has `failed_count = 0` and
+`check_passed = true`.
 
 `MAINTAIN` exists only on PostgreSQL 17 and newer. The core migration performs
 its effective `MAINTAIN` checks inside a nested version guard using dynamic SQL,
@@ -309,13 +381,19 @@ privilege-check function.
 
 Immediately before `COMMIT`, the core migration runs a final fail-closed `DO`
 block. It rechecks the exact 34-table/RLS inventory, dangerous effective grants,
-the 12-table anonymous allowlist, the marketplace-party grant matrix and seller
-INSERT policy, financial-view state, the six retained policies' metadata,
-dependencies, and critical predicate ingredients, all expected Phase 3.2B read
+including effective authenticated TRUNCATE, REFERENCES, and TRIGGER on every
+public base table, the 12-table anonymous allowlist, the marketplace-party grant
+matrix and seller INSERT policy, financial-view state, the six retained
+policies' exact semantics and dependencies, all expected Phase 3.2B read
 policies, child guards and permissive seller paths, complete helper definitions
-and grants, anonymous helper
-dependencies, and effective postgres defaults across all four scopes. Any
-failure raises inside the transaction and rolls back every change. The optional
+and grants, anonymous helper dependencies, and effective postgres defaults
+across all four application-controlled scopes. It also rechecks the exact
+managed-storage signature, rejects any unreviewed postgres role-default scope,
+proves storage function EXECUTE remains effective for all three reviewed roles,
+and requires explicit future-function EXECUTE for `service_role` while
+rejecting client inheritance of that role. Any failure raises inside the
+transaction and rolls back every
+change. The optional
 managed-role migration has an equivalent four-scope default-privilege
 postflight. The external verification SQL remains read-only.
 
@@ -333,7 +411,7 @@ postflight. The external verification SQL remains read-only.
 4. In an isolated staging clone, restore-test the backup before changing SQL.
 5. Run the core migration manually in staging using the intended deployment
    role. A preflight error or timeout means the entire transaction rolls back.
-6. Run all 13 verification sections. Require all summary rows to pass.
+6. Run all 14 verification sections. Require all summary rows to pass.
 7. Test anonymous catalogue reads, seller drafts, seller writes, service-role
    workflows, and financial-view access. Run:
 
@@ -357,4 +435,5 @@ postflight. The external verification SQL remains read-only.
 
 No application data, schema migration, seed data, authentication behavior,
 FastAPI contract, or README is changed by this review package. Another human
-review and live preflight confirmation remain mandatory.
+review and live preflight confirmation remain mandatory. **Human security
+review required; not approved for staging or production.**
