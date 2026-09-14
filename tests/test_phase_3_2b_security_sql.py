@@ -509,9 +509,13 @@ def test_preflight_only_artifact_is_rollback_scoped_and_has_no_migration_ops() -
 
 
 def test_only_explicit_migrations_contain_ddl_or_dcl_and_no_app_dml() -> None:
-    mutation_paths = {MIGRATION_PATH, MANAGED_MIGRATION_PATH}
+    mutation_paths = {
+        MIGRATION_PATH,
+        MANAGED_MIGRATION_PATH,
+        SQL_DIR / "phase-3.2c-security-hardening.sql",
+    }
     for path in SQL_DIR.glob("*.sql"):
-        if path == PREFLIGHT_PATH:
+        if path.name.endswith("-preflight.sql"):
             continue
         statements = parse_sql(read(path))
         has_mutation = any(

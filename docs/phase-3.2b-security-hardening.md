@@ -1,9 +1,12 @@
 # Phase 3.2B: Supabase security remediation package
 
-Phase 3.2B converts the live read-only audit evidence into reviewable SQL. No
-SQL in this package has been run against Supabase. Another human review and a
-live preflight-only confirmation are required; neither migration is approved
-for staging or production.
+Phase 3.2B converted the live read-only audit evidence into reviewed SQL. The
+standalone preflight and core migration were subsequently run only on a
+fake-data testing branch. The preflight passed, the core transaction succeeded,
+all 13 substantive verification sections and the final verification summary
+passed, and the catalogue and staged RLS acceptance checks passed for both
+reviewed user classes. This testing-branch evidence contains no production
+approval. The optional managed-role migration was not applied.
 
 The package contains:
 
@@ -43,9 +46,10 @@ The package contains:
   reported only `public` and global default ACLs, concealing postgres-owned
   Supabase-managed `storage` defaults. Section 07 now reports every namespace.
 
-All 34 public base tables have RLS enabled and at least one policy. None has
-FORCE RLS. Nineteen unrelated policies use `FOR ALL`; their operation-specific
-semantics remain deferred to Phase 3.2C.
+All 34 public base tables had RLS enabled and at least one policy in the Phase
+3.2B evidence. None had FORCE RLS. The operation-specific semantics of the
+then-observed `FOR ALL` policies remained deferred to Phase 3.2C, which must
+discover their current count dynamically.
 
 The first revised live standalone preflight stopped safely before migration
 changes on the former postgres default-ACL namespace assumption. Its initial
@@ -61,8 +65,9 @@ supporting PostgreSQL versions), sequence SELECT/UPDATE/USAGE, and function
 EXECUTE. Every row is owned by `postgres`, scoped to `storage`, and not
 grantable. No PUBLIC storage entry was observed. `anon` and `authenticated` are
 client roles. `service_role` is a managed elevated server role that bypasses
-RLS and must remain server-only. Neither migration nor another live preflight
-was run as part of this correction.
+RLS and must remain server-only. At the time of that correction neither
+migration nor another live preflight had been run; the later safe testing-branch
+outcome is recorded at the start of this document.
 
 ## Fail-closed preflight
 
@@ -427,13 +432,14 @@ postflight. The external verification SQL remains read-only.
 
 ## Deferred to Phase 3.2C
 
-- Operation-by-operation review of the remaining nineteen `FOR ALL` policies.
+- Operation-by-operation review of the current `FOR ALL` policies, with the
+  current count discovered dynamically rather than carried forward.
 - FORCE RLS, pending owner-job and administrative workflow validation.
 - New administrator write permissions for catalogue children.
 - Any managed-role default scope not exactly accepted by the separate optional
   preflight.
 
-No application data, schema migration, seed data, authentication behavior,
-FastAPI contract, or README is changed by this review package. Another human
-review and live preflight confirmation remain mandatory. **Human security
-review required; not approved for staging or production.**
+No application data, seed data, authentication behavior, FastAPI contract, or
+README was changed by the package review. Testing-branch verification does not
+authorize staging or production deployment. The deferred Phase 3.2C policy
+audit and further human review remain required.
