@@ -513,6 +513,7 @@ def test_only_explicit_migrations_contain_ddl_or_dcl_and_no_app_dml() -> None:
         MIGRATION_PATH,
         MANAGED_MIGRATION_PATH,
         SQL_DIR / "phase-3.2c-security-hardening.sql",
+        SQL_DIR / "phase-3.2d-security-hardening.sql",
     }
     for path in SQL_DIR.glob("*.sql"):
         if path.name.endswith("-preflight.sql"):

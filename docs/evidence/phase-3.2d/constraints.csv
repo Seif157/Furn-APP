@@ -1,0 +1,104 @@
+table_name,constraint_name,constraint_kind,definition,referenced_table,on_delete
+address,address_coordinates_paired,c,"CHECK (num_nonnulls(latitude, longitude) <> 1)",,
+address,address_customer_fk,f,FOREIGN KEY (customer_profile_id) REFERENCES customer_profile(id) ON UPDATE CASCADE ON DELETE RESTRICT,customer_profile,restrict
+address,address_pkey,p,PRIMARY KEY (id),,
+cart,cart_customer_fk,f,FOREIGN KEY (customer_profile_id) REFERENCES customer_profile(id) ON UPDATE CASCADE ON DELETE CASCADE,customer_profile,cascade
+cart,cart_pkey,p,PRIMARY KEY (id),,
+cart,cart_customer_unique,u,UNIQUE (customer_profile_id),,
+cart_line,cart_line_quantity_positive,c,CHECK (quantity > 0),,
+cart_line,cart_line_cart_fk,f,FOREIGN KEY (cart_id) REFERENCES cart(id) ON UPDATE CASCADE ON DELETE CASCADE,cart,cascade
+cart_line,cart_line_color_fk,f,FOREIGN KEY (product_color_id) REFERENCES product_color(id) ON UPDATE CASCADE ON DELETE CASCADE,product_color,cascade
+cart_line,cart_line_pkey,p,PRIMARY KEY (id),,
+cart_line,cart_line_unique_per_color,u,"UNIQUE (cart_id, product_color_id)",,
+custom_offering,custom_offering_price_non_negative,c,CHECK (published_price >= 0::numeric),,
+custom_offering,custom_offering_title_not_blank,c,CHECK (length(btrim(title)) > 0),,
+custom_offering,custom_offering_design_fk,f,FOREIGN KEY (design_id) REFERENCES design(id) ON UPDATE CASCADE ON DELETE RESTRICT,design,restrict
+custom_offering,custom_offering_party_fk,f,FOREIGN KEY (marketplace_party_id) REFERENCES marketplace_party(id) ON UPDATE CASCADE ON DELETE RESTRICT,marketplace_party,restrict
+custom_offering,custom_offering_pkey,p,PRIMARY KEY (id),,
+customer_profile,customer_profile_full_name_not_blank,c,CHECK (length(btrim(full_name)) > 0),,
+customer_profile,customer_profile_user_fk,f,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON UPDATE CASCADE ON DELETE CASCADE,users,cascade
+customer_profile,customer_profile_pkey,p,PRIMARY KEY (id),,
+customer_profile,customer_profile_user_unique,u,UNIQUE (user_id),,
+design,design_derivation_paired,c,"CHECK (num_nonnulls(source_design_id, source_design_version_id) <> 1)",,
+design,design_no_self_derivation,c,CHECK (source_design_id IS DISTINCT FROM id),,
+design,design_originating_user_fk,f,FOREIGN KEY (originating_user_id) REFERENCES auth.users(id) ON UPDATE CASCADE ON DELETE RESTRICT,users,restrict
+design,design_source_design_fk,f,FOREIGN KEY (source_design_id) REFERENCES design(id) ON UPDATE CASCADE ON DELETE RESTRICT,design,restrict
+design,design_source_version_fk,f,"FOREIGN KEY (source_design_version_id, source_design_id) REFERENCES design_version(id, design_id) ON UPDATE CASCADE ON DELETE RESTRICT",design_version,restrict
+design,design_pkey,p,PRIMARY KEY (id),,
+design_product_reference,design_product_reference_design_fk,f,FOREIGN KEY (design_id) REFERENCES design(id) ON UPDATE CASCADE ON DELETE CASCADE,design,cascade
+design_product_reference,design_product_reference_product_fk,f,FOREIGN KEY (product_id) REFERENCES product(id) ON UPDATE CASCADE ON DELETE CASCADE,product,cascade
+design_product_reference,design_product_reference_pk,p,"PRIMARY KEY (design_id, product_id)",,
+design_version,design_version_sequence_positive,c,CHECK (version_sequence >= 1),,
+design_version,design_version_design_fk,f,FOREIGN KEY (design_id) REFERENCES design(id) ON UPDATE CASCADE ON DELETE RESTRICT,design,restrict
+design_version,design_version_pkey,p,PRIMARY KEY (id),,
+design_version,design_version_id_design_unique,u,"UNIQUE (id, design_id)",,
+design_version,design_version_sequence_unique,u,"UNIQUE (design_id, version_sequence)",,
+furnishing_request,furnishing_request_budget_non_negative,c,CHECK ((budget_min IS NULL OR budget_min >= 0::numeric) AND (budget_max IS NULL OR budget_max >= 0::numeric)),,
+furnishing_request,furnishing_request_budget_ordered,c,CHECK (budget_min IS NULL OR budget_max IS NULL OR budget_min <= budget_max),,
+furnishing_request,furnishing_request_address_fk,f,FOREIGN KEY (address_id) REFERENCES address(id) ON UPDATE CASCADE ON DELETE RESTRICT,address,restrict
+furnishing_request,furnishing_request_customer_fk,f,FOREIGN KEY (customer_profile_id) REFERENCES customer_profile(id) ON UPDATE CASCADE ON DELETE RESTRICT,customer_profile,restrict
+furnishing_request,furnishing_request_pkey,p,PRIMARY KEY (id),,
+furnishing_request_design_version,furnishing_request_design_version_request_fk,f,FOREIGN KEY (furnishing_request_id) REFERENCES furnishing_request(id) ON UPDATE CASCADE ON DELETE CASCADE,furnishing_request,cascade
+furnishing_request_design_version,furnishing_request_design_version_version_fk,f,FOREIGN KEY (design_version_id) REFERENCES design_version(id) ON UPDATE CASCADE ON DELETE RESTRICT,design_version,restrict
+furnishing_request_design_version,furnishing_request_design_version_pk,p,"PRIMARY KEY (furnishing_request_id, design_version_id)",,
+marketplace_party,marketplace_party_business_name_not_blank,c,CHECK (length(btrim(business_name)) > 0),,
+marketplace_party,marketplace_party_state_reason_required,c,"CHECK ((approval_state <> ALL (ARRAY['rejected'::party_approval_state, 'suspended'::party_approval_state])) OR state_reason IS NOT NULL AND length(btrim(state_reason)) > 0)",,
+marketplace_party,marketplace_party_user_fk,f,FOREIGN KEY (user_id) REFERENCES auth.users(id) ON UPDATE CASCADE ON DELETE CASCADE,users,cascade
+marketplace_party,marketplace_party_pkey,p,PRIMARY KEY (id),,
+marketplace_party,marketplace_party_user_unique,u,UNIQUE (user_id),,
+offer_line_item,offer_line_item_kind_integrity,c,CHECK (line_kind = 'catalog'::line_kind AND product_id IS NOT NULL OR line_kind = 'custom'::line_kind AND product_id IS NULL AND item_name IS NOT NULL AND length(btrim(item_name)) > 0),,
+offer_line_item,offer_line_item_price_non_negative,c,CHECK (unit_price >= 0::numeric),,
+offer_line_item,offer_line_item_quantity_positive,c,CHECK (quantity > 0),,
+offer_line_item,offer_line_item_offer_fk,f,FOREIGN KEY (offer_id) REFERENCES offer(id) ON UPDATE CASCADE ON DELETE CASCADE,offer,cascade
+offer_line_item,offer_line_item_product_fk,f,FOREIGN KEY (product_id) REFERENCES product(id) ON UPDATE CASCADE ON DELETE RESTRICT,product,restrict
+offer_line_item,offer_line_item_pkey,p,PRIMARY KEY (id),,
+order_line_item,order_line_item_kind_integrity,c,CHECK (line_kind = 'catalog'::line_kind AND product_id IS NOT NULL AND product_color_id IS NOT NULL OR line_kind = 'custom'::line_kind AND product_id IS NULL AND product_color_id IS NULL),,
+order_line_item,order_line_item_name_not_blank,c,CHECK (length(btrim(item_name)) > 0),,
+order_line_item,order_line_item_price_non_negative,c,CHECK (unit_price >= 0::numeric),,
+order_line_item,order_line_item_quantity_positive,c,CHECK (quantity > 0),,
+order_line_item,order_line_item_color_fk,f,"FOREIGN KEY (product_color_id, product_id) REFERENCES product_color(id, product_id) ON UPDATE CASCADE ON DELETE RESTRICT",product_color,restrict
+order_line_item,order_line_item_order_fk,f,FOREIGN KEY (order_id) REFERENCES purchase_order(id) ON UPDATE CASCADE ON DELETE CASCADE,purchase_order,cascade
+order_line_item,order_line_item_product_fk,f,FOREIGN KEY (product_id) REFERENCES product(id) ON UPDATE CASCADE ON DELETE RESTRICT,product,restrict
+order_line_item,order_line_item_pkey,p,PRIMARY KEY (id),,
+party_capability,party_capability_party_fk,f,FOREIGN KEY (marketplace_party_id) REFERENCES marketplace_party(id) ON UPDATE CASCADE ON DELETE CASCADE,marketplace_party,cascade
+party_capability,party_capability_service_type_fk,f,FOREIGN KEY (service_type_id) REFERENCES service_type(id) ON UPDATE CASCADE ON DELETE RESTRICT,service_type,restrict
+party_capability,party_capability_pk,p,"PRIMARY KEY (marketplace_party_id, service_type_id)",,
+purchase_order,purchase_order_cancelled_timestamp,c,CHECK (lifecycle_state <> 'cancelled'::order_state OR cancelled_at IS NOT NULL),,
+purchase_order,purchase_order_delivery_fee_non_negative,c,CHECK (delivery_fee >= 0::numeric),,
+purchase_order,purchase_order_discount_non_negative,c,CHECK (order_discount_amount IS NULL OR order_discount_amount >= 0::numeric),,
+purchase_order,purchase_order_origin_agreement,c,CHECK (origin = 'stocked'::order_origin AND offer_id IS NULL AND custom_offering_id IS NULL AND service_request_id IS NULL OR origin = 'custom_offering'::order_origin AND custom_offering_id IS NOT NULL OR origin = 'furnishing'::order_origin AND offer_id IS NOT NULL OR origin = 'service'::order_origin AND service_request_id IS NOT NULL),,
+purchase_order,purchase_order_ship_coordinates_paired,c,"CHECK (num_nonnulls(ship_latitude, ship_longitude) <> 1)",,
+purchase_order,purchase_order_single_origin_ref,c,"CHECK (num_nonnulls(offer_id, custom_offering_id, service_request_id) <= 1)",,
+purchase_order,purchase_order_upfront_non_negative,c,CHECK (required_upfront_amount IS NULL OR required_upfront_amount >= 0::numeric),,
+purchase_order,purchase_order_address_fk,f,FOREIGN KEY (address_id) REFERENCES address(id) ON UPDATE CASCADE ON DELETE RESTRICT,address,restrict
+purchase_order,purchase_order_custom_offering_fk,f,FOREIGN KEY (custom_offering_id) REFERENCES custom_offering(id) ON UPDATE CASCADE ON DELETE RESTRICT,custom_offering,restrict
+purchase_order,purchase_order_customer_fk,f,FOREIGN KEY (customer_profile_id) REFERENCES customer_profile(id) ON UPDATE CASCADE ON DELETE RESTRICT,customer_profile,restrict
+purchase_order,purchase_order_offer_fk,f,FOREIGN KEY (offer_id) REFERENCES offer(id) ON UPDATE CASCADE ON DELETE RESTRICT,offer,restrict
+purchase_order,purchase_order_party_fk,f,FOREIGN KEY (marketplace_party_id) REFERENCES marketplace_party(id) ON UPDATE CASCADE ON DELETE RESTRICT,marketplace_party,restrict
+purchase_order,purchase_order_service_request_fk,f,FOREIGN KEY (service_request_id) REFERENCES service_request(id) ON UPDATE CASCADE ON DELETE RESTRICT,service_request,restrict
+purchase_order,purchase_order_settlement_fk,f,FOREIGN KEY (settlement_id) REFERENCES settlement(id) ON UPDATE CASCADE ON DELETE SET NULL,settlement,set null
+purchase_order,purchase_order_pkey,p,PRIMARY KEY (id),,
+purchase_order,purchase_order_offer_unique,u,UNIQUE (offer_id),,
+purchase_order,purchase_order_service_request_unique,u,UNIQUE (service_request_id),,
+review,review_exactly_one_target,c,"CHECK (num_nonnulls(target_product_id, target_service_request_id, target_marketplace_party_id) = 1)",,
+review,review_rating_bounds,c,CHECK (rating >= 1 AND rating <= 5),,
+review,review_target_kind_agreement,c,CHECK (target_kind = 'product'::review_target_kind AND target_product_id IS NOT NULL OR target_kind = 'service_request'::review_target_kind AND target_service_request_id IS NOT NULL OR target_kind = 'marketplace_party'::review_target_kind AND target_marketplace_party_id IS NOT NULL),,
+review,review_customer_fk,f,FOREIGN KEY (customer_profile_id) REFERENCES customer_profile(id) ON UPDATE CASCADE ON DELETE RESTRICT,customer_profile,restrict
+review,review_target_party_fk,f,FOREIGN KEY (target_marketplace_party_id) REFERENCES marketplace_party(id) ON UPDATE CASCADE ON DELETE RESTRICT,marketplace_party,restrict
+review,review_target_product_fk,f,FOREIGN KEY (target_product_id) REFERENCES product(id) ON UPDATE CASCADE ON DELETE RESTRICT,product,restrict
+review,review_target_service_request_fk,f,FOREIGN KEY (target_service_request_id) REFERENCES service_request(id) ON UPDATE CASCADE ON DELETE RESTRICT,service_request,restrict
+review,review_pkey,p,PRIMARY KEY (id),,
+saved_space,saved_space_dimensions_positive,c,CHECK (width_cm > 0::numeric AND depth_cm > 0::numeric),,
+saved_space,saved_space_name_not_blank,c,CHECK (length(btrim(space_name)) > 0),,
+saved_space,saved_space_customer_fk,f,FOREIGN KEY (customer_profile_id) REFERENCES customer_profile(id) ON UPDATE CASCADE ON DELETE CASCADE,customer_profile,cascade
+saved_space,saved_space_pkey,p,PRIMARY KEY (id),,
+service_request,service_request_completed_timestamp,c,CHECK (lifecycle_state <> 'completed'::service_request_state OR completed_at IS NOT NULL),,
+service_request,service_request_executor_when_claimed,c,CHECK (lifecycle_state = 'pending'::service_request_state OR lifecycle_state = 'cancelled'::service_request_state OR marketplace_party_id IS NOT NULL AND accepted_at IS NOT NULL),,
+service_request,service_request_price_non_negative,c,CHECK (price IS NULL OR price >= 0::numeric),,
+service_request,service_request_priced_when_claimed,c,"CHECK ((lifecycle_state = ANY (ARRAY['pending'::service_request_state, 'cancelled'::service_request_state])) OR price IS NOT NULL)",,
+service_request,service_request_address_fk,f,FOREIGN KEY (address_id) REFERENCES address(id) ON UPDATE CASCADE ON DELETE RESTRICT,address,restrict
+service_request,service_request_customer_fk,f,FOREIGN KEY (customer_profile_id) REFERENCES customer_profile(id) ON UPDATE CASCADE ON DELETE RESTRICT,customer_profile,restrict
+service_request,service_request_party_fk,f,FOREIGN KEY (marketplace_party_id) REFERENCES marketplace_party(id) ON UPDATE CASCADE ON DELETE RESTRICT,marketplace_party,restrict
+service_request,service_request_related_order_fk,f,FOREIGN KEY (related_order_id) REFERENCES purchase_order(id) ON UPDATE CASCADE ON DELETE SET NULL,purchase_order,set null
+service_request,service_request_service_type_fk,f,FOREIGN KEY (service_type_id) REFERENCES service_type(id) ON UPDATE CASCADE ON DELETE RESTRICT,service_type,restrict
+service_request,service_request_pkey,p,PRIMARY KEY (id),,
