@@ -1,12 +1,12 @@
 /*
 Phase 3.2C targeted hardening verification -- READ ONLY.
 
-Run each numbered SELECT separately only after a reviewed migration attempt.
-Every section returns expected_count, actual_count, failed_count, and
-check_passed. No statement reads application rows.
+Run each numbered SELECT separately only after an independently reviewed
+migration. Every section returns expected_count, actual_count, failed_count,
+and check_passed. No statement reads application rows.
 */
 
--- 01. Customer-profile helper definition, owner, mode, path, and exact grants.
+-- 01. Hardened customer-profile helper definition and exact grants.
 WITH roles AS (
     SELECT
         max(oid) FILTER (WHERE rolname = 'anon') AS anon_oid,
@@ -94,223 +94,84 @@ SELECT
 FROM comparison;
 
 
--- 02. Anonymous callers have no raw review SELECT path.
+-- 02. Anonymous review access is exactly seven columns, never table-wide.
 WITH role_oids AS (
     SELECT max(oid) FILTER (WHERE rolname = 'anon') AS anon_oid
     FROM pg_catalog.pg_roles
 ),
+expected(column_name, should_select) AS (
+    VALUES
+        ('id'::name, true),
+        ('target_kind'::name, true),
+        ('target_product_id'::name, true),
+        ('target_marketplace_party_id'::name, true),
+        ('rating'::name, true),
+        ('comment'::name, true),
+        ('created_at'::name, true),
+        ('customer_profile_id'::name, false),
+        ('target_service_request_id'::name, false)
+),
 comparison AS (
     SELECT
-        NOT pg_catalog.has_table_privilege(
+        expected.column_name,
+        pg_catalog.has_column_privilege(
             role_oids.anon_oid,
             'public.review'::pg_catalog.regclass,
+            expected.column_name,
             'SELECT'
-        )
-        AND NOT EXISTS (
-            SELECT 1
-            FROM pg_catalog.pg_class AS relation
-            CROSS JOIN LATERAL pg_catalog.aclexplode(
-                COALESCE(
-                    relation.relacl,
-                    pg_catalog.acldefault(
-                        'r'::pg_catalog."char",
-                        relation.relowner
-                    )
-                )
-            ) AS acl
-            WHERE relation.oid = 'public.review'::pg_catalog.regclass
-              AND acl.grantee = 0
-              AND acl.privilege_type = 'SELECT'
-        ) AS passed
+        ) = expected.should_select AS passed
+    FROM expected
+    CROSS JOIN role_oids
+),
+table_grant AS (
+    SELECT pg_catalog.has_table_privilege(
+        role_oids.anon_oid,
+        'public.review'::pg_catalog.regclass,
+        'SELECT'
+    ) AS present
     FROM role_oids
 )
 SELECT
-    'raw_review_anon_denial'::text AS check_name,
-    1::bigint AS expected_count,
+    'review_anon_column_grants'::text AS check_name,
+    9::bigint AS expected_count,
     count(*) FILTER (WHERE passed)::bigint AS actual_count,
-    1 - count(*) FILTER (WHERE passed) AS failed_count,
-    count(*) FILTER (WHERE passed) = 1 AS check_passed
-FROM comparison;
+    9 - count(*) FILTER (WHERE passed)
+        + count(*) FILTER (WHERE table_grant.present) AS failed_count,
+    count(*) FILTER (WHERE passed) = 9
+        AND NOT bool_or(table_grant.present) AS check_passed
+FROM comparison
+CROSS JOIN table_grant;
 
 
--- 03. Public review view has the exact projection, predicates, grants, and
--- non-updatable owner-rights safety envelope.
-WITH expected_columns(column_name) AS (
-    VALUES
-        ('id'::name),
-        ('target_kind'::name),
-        ('target_product_id'::name),
-        ('target_marketplace_party_id'::name),
-        ('rating'::name),
-        ('comment'::name),
-        ('created_at'::name)
-),
-actual_columns(column_name) AS (
-    SELECT column_metadata.column_name::name
-    FROM information_schema.columns AS column_metadata
-    WHERE column_metadata.table_schema = 'public'
-      AND column_metadata.table_name = 'public_review'
-),
-column_drift AS (
-    (SELECT column_name FROM expected_columns
-     EXCEPT
-     SELECT column_name FROM actual_columns)
-    UNION ALL
-    (SELECT column_name FROM actual_columns
-     EXCEPT
-     SELECT column_name FROM expected_columns)
-),
-roles AS (
-    SELECT
-        max(oid) FILTER (WHERE rolname = 'anon') AS anon_oid,
-        max(oid) FILTER (WHERE rolname = 'authenticated') AS authenticated_oid,
-        max(oid) FILTER (WHERE rolname = 'service_role') AS service_role_oid
-    FROM pg_catalog.pg_roles
-),
-view_metadata AS (
-    SELECT
-        relation.oid,
-        relation.relowner,
-        relation.reloptions,
-        pg_catalog.pg_get_viewdef(relation.oid, true) AS definition
-    FROM pg_catalog.pg_class AS relation
-    JOIN pg_catalog.pg_namespace AS namespace
-        ON namespace.oid = relation.relnamespace
-    WHERE namespace.nspname = 'public'
-      AND relation.relname = 'public_review'
-      AND relation.relkind = 'v'::pg_catalog."char"
-),
-comparison AS (
-    SELECT
-        view_metadata.oid IS NOT NULL
-        AND pg_catalog.pg_get_userbyid(view_metadata.relowner) = 'postgres'
-        AND view_metadata.reloptions @> ARRAY['security_barrier=true']::text[]
-        AND NOT COALESCE(
-            view_metadata.reloptions @> ARRAY['security_invoker=true']::text[],
-            false
-        )
-        AND NOT EXISTS (SELECT 1 FROM column_drift)
-        AND EXISTS (
-            SELECT 1
-            FROM information_schema.views AS information_view
-            WHERE information_view.table_schema = 'public'
-              AND information_view.table_name = 'public_review'
-              AND information_view.is_updatable = 'NO'
-        )
-        AND pg_catalog.has_table_privilege(
-            roles.anon_oid,
-            view_metadata.oid,
-            'SELECT'
-        )
-        AND pg_catalog.has_table_privilege(
-            roles.authenticated_oid,
-            view_metadata.oid,
-            'SELECT'
-        )
-        AND pg_catalog.has_table_privilege(
-            roles.service_role_oid,
-            view_metadata.oid,
-            'SELECT'
-        )
-        AND NOT EXISTS (
-            SELECT 1
-            FROM pg_catalog.pg_class AS acl_view
-            CROSS JOIN LATERAL pg_catalog.aclexplode(
-                COALESCE(
-                    acl_view.relacl,
-                    pg_catalog.acldefault(
-                        'r'::pg_catalog."char",
-                        acl_view.relowner
-                    )
-                )
-            ) AS acl
-            WHERE acl_view.oid = view_metadata.oid
-              AND acl.grantee IN (
-                  0,
-                  roles.anon_oid,
-                  roles.authenticated_oid,
-                  roles.service_role_oid
-              )
-              AND (
-                  acl.privilege_type <> 'SELECT'
-                  OR acl.is_grantable
-              )
-        )
-        AND lower(view_metadata.definition) LIKE '%lifecycle_state%published%'
-        AND lower(view_metadata.definition) LIKE '%product_state%'
-        AND lower(view_metadata.definition) LIKE '%approval_state%approved%'
-        AND lower(view_metadata.definition) LIKE '%party_approval_state%'
-        AND lower(view_metadata.definition) LIKE '%is_active%'
-        AND lower(view_metadata.definition) LIKE '%stock_quantity%0%'
-        AS passed
-    FROM roles
-    LEFT JOIN view_metadata ON true
-)
-SELECT
-    'safe_public_review_projection'::text AS check_name,
-    1::bigint AS expected_count,
-    count(*) FILTER (WHERE passed)::bigint AS actual_count,
-    1 - count(*) FILTER (WHERE passed) AS failed_count,
-    count(*) FILTER (WHERE passed) = 1 AS check_passed
-FROM comparison;
-
-
--- 04. No service-request review can leave the public projection.
-WITH view_metadata AS (
-    SELECT pg_catalog.pg_get_viewdef(relation.oid, true) AS definition
-    FROM pg_catalog.pg_class AS relation
-    JOIN pg_catalog.pg_namespace AS namespace
-        ON namespace.oid = relation.relnamespace
-    WHERE namespace.nspname = 'public'
-      AND relation.relname = 'public_review'
-      AND relation.relkind = 'v'::pg_catalog."char"
-),
-comparison AS (
-    SELECT
-        lower(definition) NOT LIKE '%customer_profile_id%'
-        AND lower(definition) NOT LIKE '%''service_request''%'
-        AND (
-            length(lower(definition))
-            - length(replace(lower(definition), 'target_service_request_id', ''))
-        ) / length('target_service_request_id') = 2
-        AND (
-            length(lower(definition))
-            - length(replace(
-                lower(definition),
-                'target_service_request_id is null',
-                ''
-            ))
-        ) / length('target_service_request_id is null') = 2
-        AS passed
-    FROM view_metadata
-)
-SELECT
-    'public_service_request_review_denial'::text AS check_name,
-    1::bigint AS expected_count,
-    count(*) FILTER (WHERE passed)::bigint AS actual_count,
-    1 - count(*) FILTER (WHERE passed) AS failed_count,
-    count(*) FILTER (WHERE passed) = 1 AS check_passed
-FROM comparison;
-
-
--- 05. Service-type anonymous visibility is active-only.
+-- 03. The anon-only review policy enforces complete public eligibility.
 WITH comparison AS (
     SELECT
         policy.policyname IS NOT NULL
-        AND policy.permissive = 'RESTRICTIVE'
+        AND policy.permissive = 'PERMISSIVE'
         AND policy.cmd = 'SELECT'
         AND policy.roles = ARRAY['anon']::name[]
-        AND lower(policy.qual) LIKE '%is_active%'
+        AND lower(policy.qual) LIKE '%target_kind%product%'
+        AND lower(policy.qual) LIKE '%target_product_id%is not null%'
+        AND lower(policy.qual) LIKE '%target_marketplace_party_id%is null%'
+        AND lower(policy.qual) LIKE '%target_service_request_id%is null%'
+        AND lower(policy.qual) LIKE '%lifecycle_state%published%'
+        AND lower(policy.qual) LIKE '%product_state%'
+        AND lower(policy.qual) LIKE '%approval_state%approved%'
+        AND lower(policy.qual) LIKE '%party_approval_state%'
+        AND lower(policy.qual) LIKE '%category%is_active%'
+        AND lower(policy.qual) LIKE '%stock_quantity%0%'
+        AND lower(policy.qual) LIKE '%target_kind%marketplace_party%'
         AND lower(policy.qual) NOT LIKE '%is_admin%'
+        AND lower(policy.qual) NOT LIKE '%current_customer_profile_id%'
         AS passed
     FROM (SELECT true) AS seed
     LEFT JOIN pg_catalog.pg_policies AS policy
         ON policy.schemaname = 'public'
-       AND policy.tablename = 'service_type'
-       AND policy.policyname = 'phase32c_service_type_anon_read_guard'
+       AND policy.tablename = 'review'
+       AND policy.policyname = 'phase32c_review_anon_safe_read'
 )
 SELECT
-    'active_service_type_public_read'::text AS check_name,
+    'review_anon_policy_eligibility'::text AS check_name,
     1::bigint AS expected_count,
     count(*) FILTER (WHERE passed)::bigint AS actual_count,
     1 - count(*) FILTER (WHERE passed) AS failed_count,
@@ -318,14 +179,138 @@ SELECT
 FROM comparison;
 
 
--- 06. Anonymous capability visibility requires approved party and active type.
+-- 04. Review policies exclude service targets and malformed target columns.
+WITH target_policy AS (
+    SELECT lower(policy.qual) AS predicate
+    FROM pg_catalog.pg_policies AS policy
+    WHERE policy.schemaname = 'public'
+      AND policy.tablename = 'review'
+      AND policy.policyname = 'phase32c_review_anon_safe_read'
+),
+comparison AS (
+    SELECT
+        predicate NOT LIKE '%''service_request''%'
+        AND (
+            length(predicate)
+            - length(replace(
+                predicate,
+                'target_service_request_id is null',
+                ''
+            ))
+        ) / length('target_service_request_id is null') = 2
+        AND predicate LIKE '%target_product_id is not null%'
+        AND predicate LIKE '%target_product_id is null%'
+        AND predicate LIKE '%target_marketplace_party_id is not null%'
+        AND predicate LIKE '%target_marketplace_party_id is null%'
+        AS passed
+    FROM target_policy
+)
+SELECT
+    'review_service_and_malformed_rows_excluded'::text AS check_name,
+    1::bigint AS expected_count,
+    count(*) FILTER (WHERE passed)::bigint AS actual_count,
+    1 - count(*) FILTER (WHERE passed) AS failed_count,
+    count(*) FILTER (WHERE passed) = 1 AS check_passed
+FROM comparison;
+
+
+-- 05. Authenticated raw review reads are restricted to owner or administrator.
 WITH comparison AS (
     SELECT
         policy.policyname IS NOT NULL
         AND policy.permissive = 'RESTRICTIVE'
         AND policy.cmd = 'SELECT'
+        AND policy.roles = ARRAY['authenticated']::name[]
+        AND lower(policy.qual) LIKE '%customer_profile_id%'
+        AND lower(policy.qual) LIKE '%current_customer_profile_id%'
+        AND lower(policy.qual) LIKE '%is_admin%'
+        AND pg_catalog.has_table_privilege(
+            'authenticated',
+            'public.review'::pg_catalog.regclass,
+            'SELECT'
+        )
+        AND pg_catalog.has_table_privilege(
+            'service_role',
+            'public.review'::pg_catalog.regclass,
+            'SELECT'
+        )
+        AS passed
+    FROM (SELECT true) AS seed
+    LEFT JOIN pg_catalog.pg_policies AS policy
+        ON policy.schemaname = 'public'
+       AND policy.tablename = 'review'
+       AND policy.policyname = 'phase32c_review_authenticated_read_guard'
+),
+old_policy AS (
+    SELECT count(*)::bigint AS old_count
+    FROM pg_catalog.pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'review'
+      AND policyname = 'review_select_public'
+)
+SELECT
+    'review_authenticated_owner_admin_guard'::text AS check_name,
+    1::bigint AS expected_count,
+    count(*) FILTER (WHERE comparison.passed)::bigint AS actual_count,
+    1 - count(*) FILTER (WHERE comparison.passed)
+        + old_policy.old_count AS failed_count,
+    count(*) FILTER (WHERE comparison.passed) = 1
+        AND old_policy.old_count = 0 AS check_passed
+FROM comparison
+CROSS JOIN old_policy
+GROUP BY old_policy.old_count;
+
+
+-- 06. Service-type reads are active-only for anon/authenticated clients.
+WITH expected(policy_name, role_name) AS (
+    VALUES
+        ('phase32c_service_type_anon_read'::name, 'anon'::name),
+        ('phase32c_service_type_authenticated_read'::name, 'authenticated'::name)
+),
+comparison AS (
+    SELECT
+        expected.policy_name,
+        actual.policyname IS NOT NULL
+        AND actual.permissive = 'PERMISSIVE'
+        AND actual.cmd = 'SELECT'
+        AND actual.roles = ARRAY[expected.role_name]::name[]
+        AND btrim(lower(actual.qual), '() ') = 'is_active'
+        AS passed
+    FROM expected
+    LEFT JOIN pg_catalog.pg_policies AS actual
+        ON actual.schemaname = 'public'
+       AND actual.tablename = 'service_type'
+       AND actual.policyname = expected.policy_name
+),
+old_policy AS (
+    SELECT count(*)::bigint AS old_count
+    FROM pg_catalog.pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'service_type'
+      AND policyname = 'service_type_select_public'
+)
+SELECT
+    'service_type_active_only'::text AS check_name,
+    2::bigint AS expected_count,
+    count(*) FILTER (WHERE comparison.passed)::bigint AS actual_count,
+    2 - count(*) FILTER (WHERE comparison.passed)
+        + old_policy.old_count AS failed_count,
+    count(*) FILTER (WHERE comparison.passed) = 2
+        AND old_policy.old_count = 0 AS check_passed
+FROM comparison
+CROSS JOIN old_policy
+GROUP BY old_policy.old_count;
+
+
+-- 07. Anonymous capabilities require approved parties and active services.
+WITH comparison AS (
+    SELECT
+        policy.policyname IS NOT NULL
+        AND policy.permissive = 'PERMISSIVE'
+        AND policy.cmd = 'SELECT'
         AND policy.roles = ARRAY['anon']::name[]
-        AND lower(policy.qual) LIKE '%marketplace_party%approval_state%approved%'
+        AND lower(policy.qual)
+            LIKE '%marketplace_party%approval_state%approved%'
         AND lower(policy.qual) LIKE '%service_type%is_active%'
         AND lower(policy.qual) NOT LIKE '%current_marketplace_party_id%'
         AND lower(policy.qual) NOT LIKE '%is_admin%'
@@ -334,59 +319,154 @@ WITH comparison AS (
     LEFT JOIN pg_catalog.pg_policies AS policy
         ON policy.schemaname = 'public'
        AND policy.tablename = 'party_capability'
-       AND policy.policyname = 'phase32c_party_capability_anon_read_guard'
+       AND policy.policyname = 'phase32c_party_capability_anon_read'
+),
+old_policy AS (
+    SELECT count(*)::bigint AS old_count
+    FROM pg_catalog.pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'party_capability'
+      AND policyname = 'party_capability_select'
 )
 SELECT
-    'safe_public_party_capability'::text AS check_name,
+    'party_capability_public_scope'::text AS check_name,
     1::bigint AS expected_count,
-    count(*) FILTER (WHERE passed)::bigint AS actual_count,
-    1 - count(*) FILTER (WHERE passed) AS failed_count,
-    count(*) FILTER (WHERE passed) = 1 AS check_passed
-FROM comparison;
+    count(*) FILTER (WHERE comparison.passed)::bigint AS actual_count,
+    1 - count(*) FILTER (WHERE comparison.passed)
+        + old_policy.old_count AS failed_count,
+    count(*) FILTER (WHERE comparison.passed) = 1
+        AND old_policy.old_count = 0 AS check_passed
+FROM comparison
+CROSS JOIN old_policy
+GROUP BY old_policy.old_count;
 
 
--- 07. Authenticated service-directory guards retain owner/admin paths.
-WITH expected(table_name, policy_name, owner_required) AS (
+-- 08. Authenticated directory policies have eligible, owner, and admin paths.
+WITH expected(policy_name, required_ingredient) AS (
     VALUES
-        (
-            'service_type'::name,
-            'phase32c_service_type_authenticated_read_guard'::name,
-            false
-        ),
-        (
-            'party_capability'::name,
-            'phase32c_party_capability_authenticated_read_guard'::name,
-            true
-        )
+        ('phase32c_party_capability_authenticated_read'::name, 'approval_state'::text),
+        ('phase32c_party_capability_owner_read'::name, 'current_marketplace_party_id'::text),
+        ('phase32c_party_capability_admin_read'::name, 'is_admin'::text)
 ),
 comparison AS (
     SELECT
         expected.policy_name,
         actual.policyname IS NOT NULL
-        AND actual.permissive = 'RESTRICTIVE'
+        AND actual.permissive = 'PERMISSIVE'
         AND actual.cmd = 'SELECT'
         AND actual.roles = ARRAY['authenticated']::name[]
-        AND lower(actual.qual) LIKE '%is_admin%'
-        AND (
-            NOT expected.owner_required
-            OR lower(actual.qual) LIKE '%current_marketplace_party_id%'
-        ) AS passed
+        AND lower(actual.qual) LIKE
+            '%' || expected.required_ingredient || '%'
+        AS passed
     FROM expected
     LEFT JOIN pg_catalog.pg_policies AS actual
         ON actual.schemaname = 'public'
-       AND actual.tablename = expected.table_name
+       AND actual.tablename = 'party_capability'
        AND actual.policyname = expected.policy_name
 )
 SELECT
     'service_directory_owner_admin_paths'::text AS check_name,
-    2::bigint AS expected_count,
+    3::bigint AS expected_count,
     count(*) FILTER (WHERE passed)::bigint AS actual_count,
-    2 - count(*) FILTER (WHERE passed) AS failed_count,
-    count(*) FILTER (WHERE passed) = 2 AS check_passed
+    3 - count(*) FILTER (WHERE passed) AS failed_count,
+    count(*) FILTER (WHERE passed) = 3 AS check_passed
 FROM comparison;
 
 
--- 08. Furnishing-request write access is operation-specific, never FOR ALL.
+-- 09. Furnishing-request has the exact live-confirmed 13-column signature.
+WITH expected(
+    ordinal_position,
+    column_name,
+    formatted_type,
+    type_oid,
+    type_modifier,
+    is_not_null,
+    default_expression,
+    identity_kind,
+    generated_kind
+) AS (
+    VALUES
+        (1, 'id'::name, 'uuid'::text, 'pg_catalog.uuid'::pg_catalog.regtype, -1, true, 'gen_random_uuid()'::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+        (2, 'customer_profile_id'::name, 'uuid'::text, 'pg_catalog.uuid'::pg_catalog.regtype, -1, true, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+        (3, 'address_id'::name, 'uuid'::text, 'pg_catalog.uuid'::pg_catalog.regtype, -1, true, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+        (4, 'title'::name, 'text'::text, 'pg_catalog.text'::pg_catalog.regtype, -1, true, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+        (5, 'requirements_description'::name, 'text'::text, 'pg_catalog.text'::pg_catalog.regtype, -1, true, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+        (6, 'reference_image_urls'::name, 'text[]'::text, 'pg_catalog.text[]'::pg_catalog.regtype, -1, false, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+        (7, 'budget_min'::name, 'numeric(12,2)'::text, 'pg_catalog.numeric'::pg_catalog.regtype, 4 + (12 << 16) + 2, false, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+        (8, 'budget_max'::name, 'numeric(12,2)'::text, 'pg_catalog.numeric'::pg_catalog.regtype, 4 + (12 << 16) + 2, false, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+        (9, 'requested_timing'::name, 'text'::text, 'pg_catalog.text'::pg_catalog.regtype, -1, false, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+        (10, 'offer_deadline'::name, 'timestamp with time zone'::text, 'pg_catalog.timestamptz'::pg_catalog.regtype, -1, false, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+        (11, 'lifecycle_state'::name, 'furnishing_request_state'::text, 'public.furnishing_request_state'::pg_catalog.regtype, -1, true, '''draft''::furnishing_request_state'::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+        (12, 'created_at'::name, 'timestamp with time zone'::text, 'pg_catalog.timestamptz'::pg_catalog.regtype, -1, true, 'now()'::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+        (13, 'coarse_location'::name, 'text'::text, 'pg_catalog.text'::pg_catalog.regtype, -1, false, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char")
+),
+actual AS (
+    SELECT
+        attribute.attnum::integer AS ordinal_position,
+        attribute.attname AS column_name,
+        replace(
+            pg_catalog.format_type(attribute.atttypid, attribute.atttypmod),
+            'public.',
+            ''
+        ) AS formatted_type,
+        attribute.atttypid AS type_oid,
+        attribute.atttypmod AS type_modifier,
+        attribute.attnotnull AS is_not_null,
+        replace(
+            replace(
+                pg_catalog.pg_get_expr(
+                    column_default.adbin,
+                    column_default.adrelid,
+                    false
+                ),
+                'public.',
+                ''
+            ),
+            'pg_catalog.',
+            ''
+        ) AS default_expression,
+        attribute.attidentity AS identity_kind,
+        attribute.attgenerated AS generated_kind
+    FROM pg_catalog.pg_attribute AS attribute
+    LEFT JOIN pg_catalog.pg_attrdef AS column_default
+        ON column_default.adrelid = attribute.attrelid
+       AND column_default.adnum = attribute.attnum
+    WHERE attribute.attrelid =
+          'public.furnishing_request'::pg_catalog.regclass
+      AND attribute.attnum > 0
+      AND NOT attribute.attisdropped
+),
+missing AS (
+    SELECT * FROM expected
+    EXCEPT
+    SELECT * FROM actual
+),
+unexpected AS (
+    SELECT * FROM actual
+    EXCEPT
+    SELECT * FROM expected
+),
+counts AS (
+    SELECT
+        (SELECT count(*) FROM expected)::bigint AS expected_count,
+        (SELECT count(*) FROM actual)::bigint AS actual_count,
+        (
+            (SELECT count(*) FROM missing)
+            + (SELECT count(*) FROM unexpected)
+        )::bigint AS failed_count
+)
+SELECT
+    'furnishing_request_exact_inventory'::text AS check_name,
+    expected_count,
+    actual_count,
+    failed_count,
+    failed_count = 0
+        AND expected_count = 13
+        AND actual_count = 13 AS check_passed
+FROM counts;
+
+
+-- 10. Furnishing-request writes are split by operation, never FOR ALL.
 WITH expected(policy_name, command_name, needs_using, needs_check) AS (
     VALUES
         ('phase32c_furnishing_request_insert_own'::name, 'INSERT'::text, false, true),
@@ -400,54 +480,48 @@ comparison AS (
         AND actual.permissive = 'PERMISSIVE'
         AND actual.cmd = expected.command_name
         AND actual.roles = ARRAY['authenticated']::name[]
-        AND (NOT expected.needs_using OR actual.qual IS NOT NULL)
-        AND (NOT expected.needs_check OR actual.with_check IS NOT NULL)
-        AND lower(COALESCE(actual.qual, '')) LIKE
-            CASE WHEN expected.needs_using
-                 THEN '%current_customer_profile_id%'
-                 ELSE lower(COALESCE(actual.qual, '')) END
-        AND lower(COALESCE(actual.with_check, '')) LIKE
-            CASE WHEN expected.needs_check
-                 THEN '%current_customer_profile_id%'
-                 ELSE lower(COALESCE(actual.with_check, '')) END
-        AS passed
+        AND (
+            NOT expected.needs_using
+            OR lower(actual.qual) LIKE '%current_customer_profile_id%'
+        )
+        AND (
+            NOT expected.needs_check
+            OR lower(actual.with_check) LIKE '%current_customer_profile_id%'
+        ) AS passed
     FROM expected
     LEFT JOIN pg_catalog.pg_policies AS actual
         ON actual.schemaname = 'public'
        AND actual.tablename = 'furnishing_request'
        AND actual.policyname = expected.policy_name
 ),
-legacy_policy AS (
-    SELECT count(*)::bigint AS legacy_count
-    FROM pg_catalog.pg_policies AS policy
-    WHERE policy.schemaname = 'public'
-      AND policy.tablename = 'furnishing_request'
-      AND policy.policyname = 'furnishing_request_write_own'
-),
-counts AS (
-    SELECT
-        count(*) FILTER (WHERE comparison.passed)::bigint AS passed_count,
-        legacy_policy.legacy_count
-    FROM comparison
-    CROSS JOIN legacy_policy
-    GROUP BY legacy_policy.legacy_count
+old_policy AS (
+    SELECT count(*)::bigint AS old_count
+    FROM pg_catalog.pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'furnishing_request'
+      AND policyname = 'furnishing_request_write_own'
 )
 SELECT
     'furnishing_request_operation_policies'::text AS check_name,
     3::bigint AS expected_count,
-    passed_count AS actual_count,
-    3 - passed_count + legacy_count AS failed_count,
-    passed_count = 3 AND legacy_count = 0 AS check_passed
-FROM counts;
+    count(*) FILTER (WHERE comparison.passed)::bigint AS actual_count,
+    3 - count(*) FILTER (WHERE comparison.passed)
+        + old_policy.old_count AS failed_count,
+    count(*) FILTER (WHERE comparison.passed) = 3
+        AND old_policy.old_count = 0 AS check_passed
+FROM comparison
+CROSS JOIN old_policy
+GROUP BY old_policy.old_count;
 
 
--- 09. Ordinary customers cannot update/delete locked lifecycle states.
+-- 11. Draft-only insert, address ownership, and locked-state predicates.
 WITH target_policies AS (
-    SELECT policy.policyname, policy.cmd, policy.qual, policy.with_check
-    FROM pg_catalog.pg_policies AS policy
-    WHERE policy.schemaname = 'public'
-      AND policy.tablename = 'furnishing_request'
-      AND policy.policyname IN (
+    SELECT policyname, cmd, lower(qual) AS qual, lower(with_check) AS with_check
+    FROM pg_catalog.pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'furnishing_request'
+      AND policyname IN (
+          'phase32c_furnishing_request_insert_own',
           'phase32c_furnishing_request_update_own',
           'phase32c_furnishing_request_delete_own'
       )
@@ -455,25 +529,147 @@ WITH target_policies AS (
 comparison AS (
     SELECT
         policyname,
-        lower(COALESCE(qual, '')) LIKE '%draft%'
-        AND lower(COALESCE(qual, '')) LIKE '%open%'
-        AND lower(COALESCE(qual, '')) NOT LIKE '%accepted%'
-        AND lower(COALESCE(qual, '')) NOT LIKE '%withdrawn%'
-        AND lower(COALESCE(qual, '')) NOT LIKE '%closed%'
-        AND (
-            cmd <> 'UPDATE'
-            OR (
-                lower(COALESCE(with_check, '')) LIKE '%draft%'
-                AND lower(COALESCE(with_check, '')) LIKE '%open%'
-                AND lower(COALESCE(with_check, '')) NOT LIKE '%accepted%'
-                AND lower(COALESCE(with_check, '')) NOT LIKE '%withdrawn%'
-                AND lower(COALESCE(with_check, '')) NOT LIKE '%closed%'
-            )
-        ) AS passed
+        CASE cmd
+            WHEN 'INSERT' THEN
+                qual IS NULL
+                AND with_check LIKE
+                    '%customer_profile_id%current_customer_profile_id%'
+                AND with_check LIKE
+                    '%lifecycle_state%draft%furnishing_request_state%'
+                AND with_check LIKE '%public.address%'
+                AND with_check LIKE '%request_address.id%address_id%'
+                AND with_check LIKE
+                    '%request_address.customer_profile_id%current_customer_profile_id%'
+                AND with_check NOT LIKE '%open%'
+            WHEN 'UPDATE' THEN
+                qual LIKE
+                    '%customer_profile_id%current_customer_profile_id%'
+                AND qual LIKE '%lifecycle_state%draft%'
+                AND qual LIKE '%lifecycle_state%open%'
+                AND with_check LIKE
+                    '%customer_profile_id%current_customer_profile_id%'
+                AND with_check LIKE '%lifecycle_state%draft%'
+                AND with_check LIKE '%lifecycle_state%open%'
+                AND with_check LIKE '%public.address%'
+                AND with_check LIKE '%request_address.id%address_id%'
+                AND with_check LIKE
+                    '%request_address.customer_profile_id%current_customer_profile_id%'
+                AND qual NOT LIKE '%accepted%'
+                AND qual NOT LIKE '%withdrawn%'
+                AND qual NOT LIKE '%closed%'
+                AND with_check NOT LIKE '%accepted%'
+                AND with_check NOT LIKE '%withdrawn%'
+                AND with_check NOT LIKE '%closed%'
+            WHEN 'DELETE' THEN
+                with_check IS NULL
+                AND qual LIKE
+                    '%customer_profile_id%current_customer_profile_id%'
+                AND qual LIKE '%lifecycle_state%draft%'
+                AND qual LIKE '%lifecycle_state%open%'
+                AND qual NOT LIKE '%accepted%'
+                AND qual NOT LIKE '%withdrawn%'
+                AND qual NOT LIKE '%closed%'
+            ELSE false
+        END
+        AND lower(
+            concat_ws(' ', qual, with_check)
+        ) NOT LIKE '%or true%'
+        AS passed
     FROM target_policies
 )
 SELECT
-    'furnishing_request_locked_states'::text AS check_name,
+    'furnishing_request_lifecycle_and_address_predicates'::text AS check_name,
+    3::bigint AS expected_count,
+    count(*) FILTER (WHERE passed)::bigint AS actual_count,
+    3 - count(*) FILTER (WHERE passed) AS failed_count,
+    count(*) FILTER (WHERE passed) = 3 AS check_passed
+FROM comparison;
+
+
+-- 12. Transition functions have exact state directions and safe metadata.
+WITH roles AS (
+    SELECT max(oid) FILTER (WHERE rolname = 'postgres') AS postgres_oid
+    FROM pg_catalog.pg_roles
+),
+expected(function_name, old_state, new_state, forbidden_states) AS (
+    VALUES
+        (
+            'open_furnishing_request'::name,
+            'draft'::text,
+            'open'::text,
+            ARRAY['withdrawn', 'accepted', 'closed']::text[]
+        ),
+        (
+            'withdraw_furnishing_request'::name,
+            'open'::text,
+            'withdrawn'::text,
+            ARRAY['draft', 'accepted', 'closed']::text[]
+        )
+),
+comparison AS (
+    SELECT
+        expected.function_name,
+        function_metadata.oid IS NOT NULL
+        AND function_metadata.prorettype =
+            'pg_catalog.boolean'::pg_catalog.regtype
+        AND function_metadata.prolang = (
+            SELECT language.oid
+            FROM pg_catalog.pg_language AS language
+            WHERE language.lanname = 'plpgsql'
+        )
+        AND function_metadata.provolatile = 'v'::pg_catalog."char"
+        AND function_metadata.prosecdef
+        AND function_metadata.proowner = roles.postgres_oid
+        AND function_metadata.proconfig = ARRAY['search_path=']::text[]
+        AND lower(function_metadata.prosrc)
+            LIKE '%"public".furnishing_request%'
+        AND lower(function_metadata.prosrc) LIKE '%public.customer_profile%'
+        AND lower(function_metadata.prosrc) LIKE '%auth.uid()%'
+        AND lower(function_metadata.prosrc)
+            LIKE '%lifecycle_state::text = '''
+                || expected.old_state || '''%'
+        AND lower(function_metadata.prosrc)
+            LIKE '%set lifecycle_state = '''
+                || expected.new_state || '''%'
+        AND (
+            length(lower(function_metadata.prosrc))
+            - length(replace(
+                lower(function_metadata.prosrc),
+                'set lifecycle_state',
+                ''
+            ))
+        ) / length('set lifecycle_state') = 1
+        AND position(
+            ',' IN split_part(
+                split_part(
+                    lower(function_metadata.prosrc),
+                    'set lifecycle_state',
+                    2
+                ),
+                'where',
+                1
+            )
+        ) = 0
+        AND lower(function_metadata.prosrc) NOT LIKE '%or true%'
+        AND lower(function_metadata.prosrc) LIKE '%affected_rows = 1%'
+        AND NOT EXISTS (
+            SELECT 1
+            FROM unnest(expected.forbidden_states) AS forbidden(state_name)
+            WHERE lower(function_metadata.prosrc)
+                LIKE '%''' || forbidden.state_name || '''%'
+        ) AS passed
+    FROM expected
+    CROSS JOIN roles
+    LEFT JOIN pg_catalog.pg_proc AS function_metadata
+        ON function_metadata.oid = pg_catalog.to_regprocedure(
+            pg_catalog.format(
+                'public.%I(pg_catalog.uuid)',
+                expected.function_name
+            )
+        )
+)
+SELECT
+    'furnishing_transition_definitions'::text AS check_name,
     2::bigint AS expected_count,
     count(*) FILTER (WHERE passed)::bigint AS actual_count,
     2 - count(*) FILTER (WHERE passed) AS failed_count,
@@ -481,7 +677,222 @@ SELECT
 FROM comparison;
 
 
--- 10. Financial view remains invoker-rights and authenticated SELECT-only.
+-- 13. Transition EXECUTE is authenticated/service-only without grant option.
+WITH roles AS (
+    SELECT
+        max(oid) FILTER (WHERE rolname = 'anon') AS anon_oid,
+        max(oid) FILTER (WHERE rolname = 'authenticated') AS authenticated_oid,
+        max(oid) FILTER (WHERE rolname = 'service_role') AS service_role_oid
+    FROM pg_catalog.pg_roles
+),
+expected(function_name) AS (
+    VALUES
+        ('open_furnishing_request'::name),
+        ('withdraw_furnishing_request'::name)
+),
+comparison AS (
+    SELECT
+        expected.function_name,
+        function_metadata.oid IS NOT NULL
+        AND NOT pg_catalog.has_function_privilege(
+            roles.anon_oid,
+            function_metadata.oid,
+            'EXECUTE'
+        )
+        AND pg_catalog.has_function_privilege(
+            roles.authenticated_oid,
+            function_metadata.oid,
+            'EXECUTE'
+        )
+        AND pg_catalog.has_function_privilege(
+            roles.service_role_oid,
+            function_metadata.oid,
+            'EXECUTE'
+        )
+        AND NOT EXISTS (
+            SELECT 1
+            FROM pg_catalog.aclexplode(
+                COALESCE(
+                    function_metadata.proacl,
+                    pg_catalog.acldefault(
+                        'f'::pg_catalog."char",
+                        function_metadata.proowner
+                    )
+                )
+            ) AS acl
+            WHERE acl.privilege_type = 'EXECUTE'
+              AND (
+                  acl.grantee NOT IN (
+                      function_metadata.proowner,
+                      roles.authenticated_oid,
+                      roles.service_role_oid
+                  )
+                  OR (
+                      acl.grantee IN (
+                          roles.authenticated_oid,
+                          roles.service_role_oid
+                      )
+                      AND acl.is_grantable
+                  )
+              )
+        ) AS passed
+    FROM expected
+    CROSS JOIN roles
+    LEFT JOIN pg_catalog.pg_proc AS function_metadata
+        ON function_metadata.oid = pg_catalog.to_regprocedure(
+            pg_catalog.format(
+                'public.%I(pg_catalog.uuid)',
+                expected.function_name
+            )
+        )
+)
+SELECT
+    'furnishing_transition_grants'::text AS check_name,
+    2::bigint AS expected_count,
+    count(*) FILTER (WHERE passed)::bigint AS actual_count,
+    2 - count(*) FILTER (WHERE passed) AS failed_count,
+    count(*) FILTER (WHERE passed) = 2 AS check_passed
+FROM comparison;
+
+
+-- 14. Exact furnishing INSERT/UPDATE privilege matrix and direct ACL rows.
+WITH roles AS (
+    SELECT
+        max(oid) FILTER (WHERE rolname = 'anon') AS anon_oid,
+        max(oid) FILTER (WHERE rolname = 'authenticated') AS authenticated_oid,
+        max(oid) FILTER (WHERE rolname = 'service_role') AS service_role_oid
+    FROM pg_catalog.pg_roles
+),
+target_columns(
+    column_name,
+    authenticated_insert,
+    authenticated_update
+) AS (
+    VALUES
+        ('id'::name, false, false),
+        ('customer_profile_id'::name, true, false),
+        ('address_id'::name, true, true),
+        ('title'::name, true, true),
+        ('requirements_description'::name, true, true),
+        ('reference_image_urls'::name, true, true),
+        ('budget_min'::name, true, true),
+        ('budget_max'::name, true, true),
+        ('requested_timing'::name, true, true),
+        ('offer_deadline'::name, true, true),
+        ('lifecycle_state'::name, false, false),
+        ('created_at'::name, false, false),
+        ('coarse_location'::name, true, true)
+),
+target_roles(role_oid, role_name) AS (
+    SELECT anon_oid, 'anon'::text FROM roles
+    UNION ALL
+    SELECT authenticated_oid, 'authenticated'::text FROM roles
+    UNION ALL
+    SELECT service_role_oid, 'service_role'::text FROM roles
+),
+operations(privilege_type) AS (
+    VALUES ('INSERT'::text), ('UPDATE'::text)
+),
+effective_comparison AS (
+    SELECT
+        target_roles.role_name,
+        target_columns.column_name,
+        operations.privilege_type,
+        pg_catalog.has_column_privilege(
+            target_roles.role_oid,
+            'public.furnishing_request'::pg_catalog.regclass,
+            target_columns.column_name,
+            operations.privilege_type
+        ) IS NOT DISTINCT FROM CASE target_roles.role_name
+            WHEN 'anon' THEN false
+            WHEN 'authenticated' THEN CASE operations.privilege_type
+                WHEN 'INSERT' THEN target_columns.authenticated_insert
+                ELSE target_columns.authenticated_update
+            END
+            ELSE true
+        END AS passed
+    FROM target_columns
+    CROSS JOIN target_roles
+    CROSS JOIN operations
+),
+expected_acl AS (
+    SELECT
+        target_columns.column_name,
+        operation.privilege_type,
+        false AS is_grantable
+    FROM target_columns
+    CROSS JOIN LATERAL (
+        VALUES
+            ('INSERT'::text, target_columns.authenticated_insert),
+            ('UPDATE'::text, target_columns.authenticated_update)
+    ) AS operation(privilege_type, allowed)
+    WHERE operation.allowed
+),
+actual_acl AS (
+    SELECT
+        attribute.attname AS column_name,
+        acl.privilege_type,
+        acl.is_grantable
+    FROM pg_catalog.pg_attribute AS attribute
+    CROSS JOIN roles
+    CROSS JOIN LATERAL pg_catalog.aclexplode(
+        COALESCE(attribute.attacl, ARRAY[]::pg_catalog.aclitem[])
+    ) AS acl
+    WHERE attribute.attrelid =
+          'public.furnishing_request'::pg_catalog.regclass
+      AND attribute.attnum > 0
+      AND NOT attribute.attisdropped
+      AND acl.grantee = roles.authenticated_oid
+      AND acl.privilege_type IN ('INSERT', 'UPDATE')
+),
+missing_acl AS (
+    SELECT * FROM expected_acl
+    EXCEPT
+    SELECT * FROM actual_acl
+),
+unexpected_acl AS (
+    SELECT * FROM actual_acl
+    EXCEPT
+    SELECT * FROM expected_acl
+),
+table_grants AS (
+    SELECT privilege_type
+    FROM roles
+    CROSS JOIN operations
+    WHERE pg_catalog.has_table_privilege(
+        roles.authenticated_oid,
+        'public.furnishing_request'::pg_catalog.regclass,
+        operations.privilege_type
+    )
+),
+counts AS (
+    SELECT
+        99::bigint AS expected_count,
+        (
+            (SELECT count(*) FILTER (WHERE passed) FROM effective_comparison)
+            + (SELECT count(*) FROM expected_acl)
+            - (SELECT count(*) FROM missing_acl)
+            + 2
+            - (SELECT count(*) FROM table_grants)
+        )::bigint AS actual_count,
+        (
+            78
+            - (SELECT count(*) FILTER (WHERE passed) FROM effective_comparison)
+            + (SELECT count(*) FROM missing_acl)
+            + (SELECT count(*) FROM unexpected_acl)
+            + (SELECT count(*) FROM table_grants)
+        )::bigint AS failed_count
+)
+SELECT
+    'furnishing_request_exact_column_privileges'::text AS check_name,
+    expected_count,
+    actual_count,
+    failed_count,
+    failed_count = 0 AND actual_count = expected_count AS check_passed
+FROM counts;
+
+
+-- 15. Financial view remains invoker-rights and authenticated SELECT-only.
 WITH roles AS (
     SELECT
         max(oid) FILTER (WHERE rolname = 'anon') AS anon_oid,
@@ -525,7 +936,11 @@ comparison AS (
                     )
                 )
             ) AS acl
-            WHERE acl.grantee IN (0, roles.anon_oid, roles.authenticated_oid)
+            WHERE acl.grantee IN (
+                0,
+                roles.anon_oid,
+                roles.authenticated_oid
+            )
               AND (
                   acl.privilege_type <> 'SELECT'
                   OR acl.is_grantable
@@ -535,7 +950,8 @@ comparison AS (
             SELECT 1
             FROM information_schema.views AS information_view
             WHERE information_view.table_schema = 'public'
-              AND information_view.table_name = 'order_financial_position'
+              AND information_view.table_name =
+                  'order_financial_position'
               AND information_view.is_updatable = 'NO'
         ) AS passed
     FROM roles
@@ -550,8 +966,7 @@ SELECT
 FROM comparison;
 
 
--- 11. All Phase 3.2B catalogue policies remain present and unchanged in role,
--- command, and mode; run the Phase 3.2B verifier for full predicate proofs.
+-- 16. The exact 30 Phase 3.2B catalogue policies remain present.
 WITH expected(table_name, policy_name, role_name, mode_name) AS (
     VALUES
         ('category'::name, 'phase32b_category_anon_read_guard'::name, 'anon'::text, 'RESTRICTIVE'::text),
@@ -608,26 +1023,44 @@ SELECT
 FROM comparison;
 
 
--- 12. Required service_role paths remain effective.
+-- 17. Required service_role paths remain effective.
 WITH roles AS (
-    SELECT max(oid) FILTER (WHERE rolname = 'service_role') AS service_role_oid
+    SELECT max(oid) FILTER (WHERE rolname = 'service_role') AS role_oid
     FROM pg_catalog.pg_roles
 ),
 checks(check_name, passed) AS (
     SELECT
         'customer_profile_helper_execute',
         pg_catalog.has_function_privilege(
-            roles.service_role_oid,
+            roles.role_oid,
             'public.current_customer_profile_id()'::pg_catalog.regprocedure,
             'EXECUTE'
         )
     FROM roles
     UNION ALL
     SELECT
-        'public_review_select',
+        'open_transition_execute',
+        pg_catalog.has_function_privilege(
+            roles.role_oid,
+            'public.open_furnishing_request(pg_catalog.uuid)'::pg_catalog.regprocedure,
+            'EXECUTE'
+        )
+    FROM roles
+    UNION ALL
+    SELECT
+        'withdraw_transition_execute',
+        pg_catalog.has_function_privilege(
+            roles.role_oid,
+            'public.withdraw_furnishing_request(pg_catalog.uuid)'::pg_catalog.regprocedure,
+            'EXECUTE'
+        )
+    FROM roles
+    UNION ALL
+    SELECT
+        'raw_review_select',
         pg_catalog.has_table_privilege(
-            roles.service_role_oid,
-            'public.public_review'::pg_catalog.regclass,
+            roles.role_oid,
+            'public.review'::pg_catalog.regclass,
             'SELECT'
         )
     FROM roles
@@ -635,7 +1068,7 @@ checks(check_name, passed) AS (
     SELECT
         'financial_view_select',
         pg_catalog.has_table_privilege(
-            roles.service_role_oid,
+            roles.role_oid,
             'public.order_financial_position'::pg_catalog.regclass,
             'SELECT'
         )
@@ -643,17 +1076,16 @@ checks(check_name, passed) AS (
 )
 SELECT
     'service_role_functional'::text AS check_name,
-    3::bigint AS expected_count,
+    5::bigint AS expected_count,
     count(*) FILTER (WHERE passed)::bigint AS actual_count,
-    3 - count(*) FILTER (WHERE passed) AS failed_count,
-    count(*) FILTER (WHERE passed) = 3 AS check_passed
+    5 - count(*) FILTER (WHERE passed) AS failed_count,
+    count(*) FILTER (WHERE passed) = 5 AS check_passed
 FROM checks;
 
 
--- 13. Client roles have no elevated attributes or service-role membership.
+-- 18. Client roles have no elevation or service_role membership.
 WITH roles AS (
-    SELECT
-        max(oid) FILTER (WHERE rolname = 'service_role') AS service_role_oid
+    SELECT max(oid) FILTER (WHERE rolname = 'service_role') AS service_role_oid
     FROM pg_catalog.pg_roles
 ),
 clients AS (
@@ -685,10 +1117,9 @@ SELECT
 FROM comparison;
 
 
--- 14. PUBLIC has no unexpected target-object privileges. PUBLIC schema USAGE
--- remains intentional and is inspected through ACL grantee OID zero.
+-- 19. PUBLIC has no privilege on targeted relations/functions.
 WITH unexpected_privileges AS (
-    SELECT relation.relname, acl.privilege_type
+    SELECT relation.relname::text AS object_name, acl.privilege_type
     FROM pg_catalog.pg_class AS relation
     JOIN pg_catalog.pg_namespace AS namespace
         ON namespace.oid = relation.relnamespace
@@ -704,12 +1135,31 @@ WITH unexpected_privileges AS (
     WHERE namespace.nspname = 'public'
       AND relation.relname IN (
           'review',
-          'public_review',
           'order_financial_position'
       )
       AND acl.grantee = 0
     UNION ALL
-    SELECT function_metadata.proname, acl.privilege_type
+    SELECT
+        relation.relname::text || '.' || attribute.attname::text,
+        acl.privilege_type
+    FROM pg_catalog.pg_class AS relation
+    JOIN pg_catalog.pg_namespace AS namespace
+        ON namespace.oid = relation.relnamespace
+    JOIN pg_catalog.pg_attribute AS attribute
+        ON attribute.attrelid = relation.oid
+       AND attribute.attnum > 0
+       AND NOT attribute.attisdropped
+    CROSS JOIN LATERAL pg_catalog.aclexplode(
+        COALESCE(
+            attribute.attacl,
+            ARRAY[]::pg_catalog.aclitem[]
+        )
+    ) AS acl
+    WHERE namespace.nspname = 'public'
+      AND relation.relname = 'review'
+      AND acl.grantee = 0
+    UNION ALL
+    SELECT function_metadata.proname::text, acl.privilege_type
     FROM pg_catalog.pg_proc AS function_metadata
     CROSS JOIN LATERAL pg_catalog.aclexplode(
         COALESCE(
@@ -720,8 +1170,11 @@ WITH unexpected_privileges AS (
             )
         )
     ) AS acl
-    WHERE function_metadata.oid =
-          'public.current_customer_profile_id()'::pg_catalog.regprocedure
+    WHERE function_metadata.oid IN (
+        'public.current_customer_profile_id()'::pg_catalog.regprocedure,
+        'public.open_furnishing_request(pg_catalog.uuid)'::pg_catalog.regprocedure,
+        'public.withdraw_furnishing_request(pg_catalog.uuid)'::pg_catalog.regprocedure
+    )
       AND acl.grantee = 0
 )
 SELECT
@@ -733,7 +1186,7 @@ SELECT
 FROM unexpected_privileges;
 
 
--- 15. Exact managed storage default ACL signature remains unchanged.
+-- 20. Exact managed Storage default ACL signature remains unchanged.
 WITH role_metadata(role_name, role_oid) AS (
     SELECT expected.role_name, actual.oid
     FROM (
@@ -764,10 +1217,7 @@ object_privileges(
         ('S'::pg_catalog."char", 's'::pg_catalog."char", 'USAGE'::text),
         ('f'::pg_catalog."char", 'f'::pg_catalog."char", 'EXECUTE'::text)
 ),
-object_type_mapping(
-    catalog_object_type,
-    acldefault_object_type
-) AS (
+object_type_mapping(catalog_object_type, acldefault_object_type) AS (
     VALUES
         ('r'::pg_catalog."char", 'r'::pg_catalog."char"),
         ('S'::pg_catalog."char", 's'::pg_catalog."char"),
@@ -837,41 +1287,3 @@ SELECT
     failed_count,
     failed_count = 0 AS check_passed
 FROM counts;
-
-
--- 16. Verification-section shape summary. Run and retain Sections 01-15; this
--- structural summary does not substitute for their individual result rows.
-WITH expected_sections(section_number) AS (
-    SELECT generate_series(1, 15)
-),
-actual_sections(section_number) AS (
-    VALUES
-        (1), (2), (3), (4), (5),
-        (6), (7), (8), (9), (10),
-        (11), (12), (13), (14), (15)
-)
-SELECT
-    'verification_section_inventory'::text AS check_name,
-    (SELECT count(*) FROM expected_sections)::bigint AS expected_count,
-    (SELECT count(*) FROM actual_sections)::bigint AS actual_count,
-    (
-        SELECT count(*)
-        FROM (
-            (SELECT section_number FROM expected_sections
-             EXCEPT
-             SELECT section_number FROM actual_sections)
-            UNION ALL
-            (SELECT section_number FROM actual_sections
-             EXCEPT
-             SELECT section_number FROM expected_sections)
-        ) AS drift
-    )::bigint AS failed_count,
-    NOT EXISTS (
-        (SELECT section_number FROM expected_sections
-         EXCEPT
-         SELECT section_number FROM actual_sections)
-        UNION ALL
-        (SELECT section_number FROM actual_sections
-         EXCEPT
-         SELECT section_number FROM expected_sections)
-    ) AS check_passed;

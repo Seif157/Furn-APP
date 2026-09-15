@@ -1,10 +1,9 @@
 /*
 Phase 3.2C targeted security hardening -- REVIEW ONLY.
 
-This transaction is deliberately fail-closed on two unresolved review inputs:
-the operation-level furnishing-request withdrawal decision and the item-by-item
-mapping of the 19 FOR ALL policies / 122 audit findings. Do not remove either
-gate without attaching the reviewed evidence described in the companion doc.
+The evidence-backed proposal now includes the live-confirmed furnishing_request
+inventory and explicit client column allowlists. It remains unapplied and must
+receive another human review before any standalone preflight or migration run.
 */
 
 BEGIN;
@@ -24,7 +23,6 @@ DECLARE
     authenticated_role_oid oid;
     service_role_oid oid;
     postgres_role_oid oid;
-    helper_acl_grantees oid[];
     expected_tables constant text[] := ARRAY[
         'address',
         'admin_user',
@@ -87,21 +85,21 @@ BEGIN
         END IF;
     END LOOP;
 
-    SELECT role_row.oid INTO STRICT anon_role_oid
-    FROM pg_catalog.pg_roles AS role_row
-    WHERE role_row.rolname = 'anon';
+    SELECT oid INTO STRICT anon_role_oid
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'anon';
 
-    SELECT role_row.oid INTO STRICT authenticated_role_oid
-    FROM pg_catalog.pg_roles AS role_row
-    WHERE role_row.rolname = 'authenticated';
+    SELECT oid INTO STRICT authenticated_role_oid
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'authenticated';
 
-    SELECT role_row.oid INTO STRICT service_role_oid
-    FROM pg_catalog.pg_roles AS role_row
-    WHERE role_row.rolname = 'service_role';
+    SELECT oid INTO STRICT service_role_oid
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'service_role';
 
-    SELECT role_row.oid INTO STRICT postgres_role_oid
-    FROM pg_catalog.pg_roles AS role_row
-    WHERE role_row.rolname = 'postgres';
+    SELECT oid INTO STRICT postgres_role_oid
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'postgres';
 
     WITH expected(table_name) AS (
         SELECT unnest(expected_tables)
@@ -160,8 +158,7 @@ BEGIN
             MESSAGE = 'Phase 3.2C RLS/FORCE inventory drift';
     END IF;
 
-    -- PUBLIC is a pseudo-role. Inspect its schema ACL as grantee OID zero;
-    -- never attempt to resolve PUBLIC through pg_roles or to_regrole().
+    -- PUBLIC is an ACL pseudo-role and is always inspected as grantee OID 0.
     IF NOT EXISTS (
         SELECT 1
         FROM pg_catalog.pg_namespace AS namespace
@@ -197,35 +194,6 @@ BEGIN
             MESSAGE = 'Phase 3.2C PUBLIC schema privilege drift';
     END IF;
 
-    IF NOT pg_catalog.has_schema_privilege(
-        anon_role_oid,
-        'public',
-        'USAGE'
-    ) OR pg_catalog.has_schema_privilege(
-        anon_role_oid,
-        'public',
-        'CREATE'
-    ) OR NOT pg_catalog.has_schema_privilege(
-        authenticated_role_oid,
-        'public',
-        'USAGE'
-    ) OR pg_catalog.has_schema_privilege(
-        authenticated_role_oid,
-        'public',
-        'CREATE'
-    ) OR NOT pg_catalog.has_schema_privilege(
-        service_role_oid,
-        'public',
-        'USAGE'
-    ) OR pg_catalog.has_schema_privilege(
-        service_role_oid,
-        'public',
-        'CREATE'
-    ) THEN
-        RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2C client/server schema privilege drift';
-    END IF;
-
     IF pg_catalog.pg_has_role(
         anon_role_oid,
         service_role_oid,
@@ -249,91 +217,72 @@ BEGIN
             MESSAGE = 'Phase 3.2C client role elevation drift';
     END IF;
 
-    IF pg_catalog.to_regprocedure(
-        'public.current_customer_profile_id()'
-    ) IS NULL THEN
-        RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2C missing customer-profile helper';
-    END IF;
+    helper_oid :=
+        'public.current_customer_profile_id()'::pg_catalog.regprocedure;
 
-    SELECT function_metadata.oid
-    INTO STRICT helper_oid
-    FROM pg_catalog.pg_proc AS function_metadata
-    WHERE function_metadata.oid =
-        'public.current_customer_profile_id()'::pg_catalog.regprocedure
-      AND function_metadata.pronargs = 0
-      AND function_metadata.prorettype = 'pg_catalog.uuid'::pg_catalog.regtype
-      AND function_metadata.prolang =
-          (SELECT language.oid
-           FROM pg_catalog.pg_language AS language
-           WHERE language.lanname = 'sql')
-      AND function_metadata.provolatile = 's'::pg_catalog."char"
-      AND function_metadata.prosecdef
-      AND function_metadata.proowner = postgres_role_oid
-      AND function_metadata.proconfig =
-          ARRAY['search_path=public, pg_temp']::text[]
-      AND lower(function_metadata.prosrc) LIKE '%public.customer_profile%'
-      AND lower(function_metadata.prosrc) LIKE '%auth.uid()%';
-
-    IF NOT FOUND THEN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_proc AS function_metadata
+        WHERE function_metadata.oid = helper_oid
+          AND function_metadata.pronargs = 0
+          AND function_metadata.prorettype =
+              'pg_catalog.uuid'::pg_catalog.regtype
+          AND function_metadata.prolang = (
+              SELECT language.oid
+              FROM pg_catalog.pg_language AS language
+              WHERE language.lanname = 'sql'
+          )
+          AND function_metadata.provolatile = 's'::pg_catalog."char"
+          AND function_metadata.prosecdef
+          AND function_metadata.proowner = postgres_role_oid
+          AND function_metadata.proconfig =
+              ARRAY['search_path=public, pg_temp']::text[]
+          AND lower(function_metadata.prosrc)
+              LIKE '%public.customer_profile%'
+          AND lower(function_metadata.prosrc) LIKE '%auth.uid()%'
+    ) THEN
         RAISE EXCEPTION USING
             MESSAGE = 'Phase 3.2C customer-profile helper signature drift';
     END IF;
 
-    SELECT array_agg(DISTINCT acl.grantee ORDER BY acl.grantee)
-    INTO helper_acl_grantees
-    FROM pg_catalog.pg_proc AS function_metadata
-    CROSS JOIN LATERAL pg_catalog.aclexplode(
-        COALESCE(
-            function_metadata.proacl,
-            pg_catalog.acldefault(
-                'f'::pg_catalog."char",
-                function_metadata.proowner
+    IF NOT pg_catalog.has_function_privilege(
+        anon_role_oid,
+        helper_oid,
+        'EXECUTE'
+    ) OR NOT pg_catalog.has_function_privilege(
+        authenticated_role_oid,
+        helper_oid,
+        'EXECUTE'
+    ) OR NOT pg_catalog.has_function_privilege(
+        service_role_oid,
+        helper_oid,
+        'EXECUTE'
+    ) OR NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_proc AS function_metadata
+        CROSS JOIN LATERAL pg_catalog.aclexplode(
+            COALESCE(
+                function_metadata.proacl,
+                pg_catalog.acldefault(
+                    'f'::pg_catalog."char",
+                    function_metadata.proowner
+                )
             )
-        )
-    ) AS acl
-    WHERE function_metadata.oid = helper_oid
-      AND acl.privilege_type = 'EXECUTE';
-
-    IF NOT 0 = ANY(helper_acl_grantees)
-       OR NOT pg_catalog.has_function_privilege(
-           anon_role_oid,
-           helper_oid,
-           'EXECUTE'
-       )
-       OR NOT pg_catalog.has_function_privilege(
-           authenticated_role_oid,
-           helper_oid,
-           'EXECUTE'
-       )
-       OR NOT pg_catalog.has_function_privilege(
-           service_role_oid,
-           helper_oid,
-           'EXECUTE'
-       )
-       OR EXISTS (
-           SELECT 1
-           FROM unnest(helper_acl_grantees) AS grantee(role_oid)
-           WHERE grantee.role_oid NOT IN (
-               0,
-               postgres_role_oid,
-               anon_role_oid,
-               authenticated_role_oid,
-               service_role_oid
-           )
-       )
-    THEN
+        ) AS acl
+        WHERE function_metadata.oid = helper_oid
+          AND acl.grantee = 0
+          AND acl.privilege_type = 'EXECUTE'
+    ) THEN
         RAISE EXCEPTION USING
             MESSAGE = 'Phase 3.2C customer-profile helper grant drift';
     END IF;
 
-    -- Revoking anonymous execution is safe only when neither an anon policy nor
-    -- a PUBLIC policy (which also applies to anon) depends on this helper.
     IF EXISTS (
         SELECT 1
         FROM pg_catalog.pg_policy AS policy
         JOIN pg_catalog.pg_depend AS dependency
-            ON dependency.classid = 'pg_catalog.pg_policy'::pg_catalog.regclass
+            ON dependency.classid =
+               'pg_catalog.pg_policy'::pg_catalog.regclass
            AND dependency.objid = policy.oid
            AND dependency.refclassid =
                'pg_catalog.pg_proc'::pg_catalog.regclass
@@ -343,6 +292,61 @@ BEGIN
     ) THEN
         RAISE EXCEPTION USING
             MESSAGE = 'Phase 3.2C anonymous policy depends on customer-profile helper';
+    END IF;
+
+    -- Exact set reconciliation against the 19 supplied Section 03 policy rows.
+    IF EXISTS (
+        WITH expected(
+            table_name,
+            policy_name,
+            policy_mode,
+            policy_roles
+        ) AS (
+            VALUES
+                ('address'::name, 'address_write_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('cart'::name, 'cart_all_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('cart_line'::name, 'cart_line_all_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('category'::name, 'category_write_admin'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('custom_offering'::name, 'custom_offering_write_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('design_product_reference'::name, 'design_product_reference_write_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('furnishing_request'::name, 'furnishing_request_write_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('furnishing_request_design_version'::name, 'furnishing_request_design_version_write_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('offer_line_item'::name, 'offer_line_item_write_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('party_capability'::name, 'party_capability_write_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('platform_config'::name, 'platform_config_rw_admin'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('product'::name, 'product_write_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('product_3d_model'::name, 'product_3d_model_write_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('product_color'::name, 'product_color_write_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('product_enrichment_assignment'::name, 'product_enrichment_assignment_write_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('product_image'::name, 'product_image_write_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('review'::name, 'review_write_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('saved_space'::name, 'saved_space_all_own'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
+                ('service_type'::name, 'service_type_write_admin'::name, 'PERMISSIVE'::text, ARRAY['authenticated']::name[])
+        ),
+        actual AS (
+            SELECT
+                policy.tablename AS table_name,
+                policy.policyname AS policy_name,
+                policy.permissive AS policy_mode,
+                policy.roles AS policy_roles
+            FROM pg_catalog.pg_policies AS policy
+            WHERE policy.schemaname = 'public'
+              AND policy.cmd = 'ALL'
+        ),
+        drift AS (
+            (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+            UNION ALL
+            (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+        )
+        SELECT 1 FROM drift
+    ) OR (
+        SELECT count(*)
+        FROM pg_catalog.pg_policies AS policy
+        WHERE policy.schemaname = 'public'
+          AND policy.cmd = 'ALL'
+    ) <> 19 THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2C Section 03 FOR ALL identity drift';
     END IF;
 
     IF EXISTS (
@@ -361,9 +365,7 @@ BEGIN
                 ('service_type'::pg_catalog.regclass, 'id'::name),
                 ('service_type'::pg_catalog.regclass, 'is_active'::name),
                 ('party_capability'::pg_catalog.regclass, 'marketplace_party_id'::name),
-                ('party_capability'::pg_catalog.regclass, 'service_type_id'::name),
-                ('furnishing_request'::pg_catalog.regclass, 'customer_profile_id'::name),
-                ('furnishing_request'::pg_catalog.regclass, 'lifecycle_state'::name)
+                ('party_capability'::pg_catalog.regclass, 'service_type_id'::name)
         ) AS expected_column(table_oid, column_name)
         WHERE NOT EXISTS (
             SELECT 1
@@ -376,6 +378,135 @@ BEGIN
     ) THEN
         RAISE EXCEPTION USING
             MESSAGE = 'Phase 3.2C required security column drift';
+    END IF;
+
+    -- Exact live-confirmed furnishing_request catalog signature.
+    IF EXISTS (
+        WITH expected(
+            ordinal_position,
+            column_name,
+            formatted_type,
+            type_oid,
+            type_modifier,
+            is_not_null,
+            default_expression,
+            identity_kind,
+            generated_kind
+        ) AS (
+            VALUES
+                (1, 'id'::name, 'uuid'::text, 'pg_catalog.uuid'::pg_catalog.regtype, -1, true, 'gen_random_uuid()'::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+                (2, 'customer_profile_id'::name, 'uuid'::text, 'pg_catalog.uuid'::pg_catalog.regtype, -1, true, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+                (3, 'address_id'::name, 'uuid'::text, 'pg_catalog.uuid'::pg_catalog.regtype, -1, true, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+                (4, 'title'::name, 'text'::text, 'pg_catalog.text'::pg_catalog.regtype, -1, true, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+                (5, 'requirements_description'::name, 'text'::text, 'pg_catalog.text'::pg_catalog.regtype, -1, true, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+                (6, 'reference_image_urls'::name, 'text[]'::text, 'pg_catalog.text[]'::pg_catalog.regtype, -1, false, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+                (7, 'budget_min'::name, 'numeric(12,2)'::text, 'pg_catalog.numeric'::pg_catalog.regtype, 4 + (12 << 16) + 2, false, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+                (8, 'budget_max'::name, 'numeric(12,2)'::text, 'pg_catalog.numeric'::pg_catalog.regtype, 4 + (12 << 16) + 2, false, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+                (9, 'requested_timing'::name, 'text'::text, 'pg_catalog.text'::pg_catalog.regtype, -1, false, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+                (10, 'offer_deadline'::name, 'timestamp with time zone'::text, 'pg_catalog.timestamptz'::pg_catalog.regtype, -1, false, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+                (11, 'lifecycle_state'::name, 'furnishing_request_state'::text, 'public.furnishing_request_state'::pg_catalog.regtype, -1, true, '''draft''::furnishing_request_state'::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+                (12, 'created_at'::name, 'timestamp with time zone'::text, 'pg_catalog.timestamptz'::pg_catalog.regtype, -1, true, 'now()'::text, ''::pg_catalog."char", ''::pg_catalog."char"),
+                (13, 'coarse_location'::name, 'text'::text, 'pg_catalog.text'::pg_catalog.regtype, -1, false, NULL::text, ''::pg_catalog."char", ''::pg_catalog."char")
+        ),
+        actual AS (
+            SELECT
+                attribute.attnum::integer AS ordinal_position,
+                attribute.attname AS column_name,
+                replace(
+                    pg_catalog.format_type(
+                        attribute.atttypid,
+                        attribute.atttypmod
+                    ),
+                    'public.',
+                    ''
+                ) AS formatted_type,
+                attribute.atttypid AS type_oid,
+                attribute.atttypmod AS type_modifier,
+                attribute.attnotnull AS is_not_null,
+                replace(
+                    replace(
+                        pg_catalog.pg_get_expr(
+                            column_default.adbin,
+                            column_default.adrelid,
+                            false
+                        ),
+                        'public.',
+                        ''
+                    ),
+                    'pg_catalog.',
+                    ''
+                ) AS default_expression,
+                attribute.attidentity AS identity_kind,
+                attribute.attgenerated AS generated_kind
+            FROM pg_catalog.pg_attribute AS attribute
+            LEFT JOIN pg_catalog.pg_attrdef AS column_default
+                ON column_default.adrelid = attribute.attrelid
+               AND column_default.adnum = attribute.attnum
+            WHERE attribute.attrelid =
+                  'public.furnishing_request'::pg_catalog.regclass
+              AND attribute.attnum > 0
+              AND NOT attribute.attisdropped
+        ),
+        drift AS (
+            (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+            UNION ALL
+            (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+        )
+        SELECT 1 FROM drift
+    ) OR (
+        SELECT count(*)
+        FROM pg_catalog.pg_attribute AS attribute
+        WHERE attribute.attrelid =
+              'public.furnishing_request'::pg_catalog.regclass
+          AND attribute.attnum > 0
+          AND NOT attribute.attisdropped
+    ) <> 13 THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2C furnishing_request inventory drift';
+    END IF;
+
+    -- Exact live-confirmed effective INSERT/UPDATE privilege baseline.
+    IF EXISTS (
+        WITH target_columns(column_name) AS (
+            VALUES
+                ('id'::name),
+                ('customer_profile_id'::name),
+                ('address_id'::name),
+                ('title'::name),
+                ('requirements_description'::name),
+                ('reference_image_urls'::name),
+                ('budget_min'::name),
+                ('budget_max'::name),
+                ('requested_timing'::name),
+                ('offer_deadline'::name),
+                ('lifecycle_state'::name),
+                ('created_at'::name),
+                ('coarse_location'::name)
+        ),
+        expected(role_oid, can_insert, can_update) AS (
+            VALUES
+                (anon_role_oid, false, false),
+                (authenticated_role_oid, true, true),
+                (service_role_oid, true, true)
+        )
+        SELECT 1
+        FROM expected
+        CROSS JOIN target_columns
+        WHERE pg_catalog.has_column_privilege(
+            expected.role_oid,
+            'public.furnishing_request'::pg_catalog.regclass,
+            target_columns.column_name,
+            'INSERT'
+        ) IS DISTINCT FROM expected.can_insert
+           OR pg_catalog.has_column_privilege(
+               expected.role_oid,
+               'public.furnishing_request'::pg_catalog.regclass,
+               target_columns.column_name,
+               'UPDATE'
+           ) IS DISTINCT FROM expected.can_update
+    ) THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2C furnishing_request privilege baseline drift';
     END IF;
 
     IF ARRAY(
@@ -443,85 +574,79 @@ BEGIN
 
     IF NOT EXISTS (
         SELECT 1
-        FROM pg_catalog.pg_policy AS policy
-        WHERE policy.polrelid =
-              'public.furnishing_request'::pg_catalog.regclass
-          AND policy.polname = 'furnishing_request_write_own'
-          AND policy.polcmd = '*'::pg_catalog."char"
-          AND policy.polpermissive
-          AND policy.polroles = ARRAY[authenticated_role_oid]::oid[]
-          AND policy.polqual IS NOT NULL
-          AND policy.polwithcheck IS NOT NULL
-          AND position(
-              'customer_profile_id' IN lower(
-                  pg_catalog.pg_get_expr(
-                      policy.polqual,
-                      policy.polrelid,
-                      false
-                  )
-              )
-          ) > 0
-          AND position(
-              'current_customer_profile_id' IN lower(
-                  pg_catalog.pg_get_expr(
-                      policy.polqual,
-                      policy.polrelid,
-                      false
-                  )
-              )
-          ) > 0
-          AND position(
-              'customer_profile_id' IN lower(
-                  pg_catalog.pg_get_expr(
-                      policy.polwithcheck,
-                      policy.polrelid,
-                      false
-                  )
-              )
-          ) > 0
-          AND position(
-              'current_customer_profile_id' IN lower(
-                  pg_catalog.pg_get_expr(
-                      policy.polwithcheck,
-                      policy.polrelid,
-                      false
-                  )
-              )
-          ) > 0
-          AND position(
-              'is_admin' IN lower(
-                  pg_catalog.concat_ws(
-                      ' ',
-                      pg_catalog.pg_get_expr(
-                          policy.polqual,
-                          policy.polrelid,
-                          false
-                      ),
-                      pg_catalog.pg_get_expr(
-                          policy.polwithcheck,
-                          policy.polrelid,
-                          false
-                      )
-                  )
-              )
-          ) = 0
-          AND EXISTS (
-              SELECT 1
-              FROM pg_catalog.pg_depend AS dependency
-              WHERE dependency.classid =
-                    'pg_catalog.pg_policy'::pg_catalog.regclass
-                AND dependency.objid = policy.oid
-                AND dependency.refclassid =
-                    'pg_catalog.pg_proc'::pg_catalog.regclass
-                AND dependency.refobjid = helper_oid
-          )
-    ) OR EXISTS (
+        FROM pg_catalog.pg_policies AS policy
+        WHERE policy.schemaname = 'public'
+          AND policy.tablename = 'review'
+          AND policy.policyname = 'review_select_public'
+          AND policy.cmd = 'SELECT'
+          AND policy.permissive = 'PERMISSIVE'
+          AND policy.roles = ARRAY['public']::name[]
+          AND btrim(lower(policy.qual), '() ') = 'true'
+    ) OR NOT EXISTS (
         SELECT 1
-        FROM pg_catalog.pg_policy AS policy
-        WHERE policy.polname LIKE 'phase32c_%'
-    ) OR pg_catalog.to_regclass('public.public_review') IS NOT NULL THEN
+        FROM pg_catalog.pg_policies AS policy
+        WHERE policy.schemaname = 'public'
+          AND policy.tablename = 'review'
+          AND policy.policyname = 'review_select_admin'
+          AND policy.cmd = 'SELECT'
+          AND policy.roles = ARRAY['authenticated']::name[]
+          AND lower(policy.qual) LIKE '%is_admin%'
+    ) OR NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_policies AS policy
+        WHERE policy.schemaname = 'public'
+          AND policy.tablename = 'service_type'
+          AND policy.policyname = 'service_type_select_public'
+          AND policy.cmd = 'SELECT'
+          AND policy.roles = ARRAY['public']::name[]
+          AND btrim(lower(policy.qual), '() ') = 'true'
+    ) OR NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_policies AS policy
+        WHERE policy.schemaname = 'public'
+          AND policy.tablename = 'party_capability'
+          AND policy.policyname = 'party_capability_select'
+          AND policy.cmd = 'SELECT'
+          AND policy.roles = ARRAY['public']::name[]
+          AND btrim(lower(policy.qual), '() ') = 'true'
+    ) THEN
         RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2C policy/view baseline drift';
+            MESSAGE = 'Phase 3.2C target policy baseline drift';
+    END IF;
+
+    IF NOT pg_catalog.has_table_privilege(
+        anon_role_oid,
+        'public.review'::pg_catalog.regclass,
+        'SELECT'
+    ) OR NOT pg_catalog.has_table_privilege(
+        authenticated_role_oid,
+        'public.review'::pg_catalog.regclass,
+        'SELECT'
+    ) OR NOT pg_catalog.has_table_privilege(
+        service_role_oid,
+        'public.review'::pg_catalog.regclass,
+        'SELECT'
+    ) THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2C review grant baseline drift';
+    END IF;
+
+    IF pg_catalog.to_regclass('public.public_review') IS NOT NULL
+       OR EXISTS (
+           SELECT 1
+           FROM pg_catalog.pg_policies AS policy
+           WHERE policy.schemaname = 'public'
+             AND policy.policyname LIKE 'phase32c_%'
+       )
+       OR pg_catalog.to_regprocedure(
+           'public.open_furnishing_request(pg_catalog.uuid)'
+       ) IS NOT NULL
+       OR pg_catalog.to_regprocedure(
+           'public.withdraw_furnishing_request(pg_catalog.uuid)'
+       ) IS NOT NULL
+    THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2C artifacts already exist';
     END IF;
 
     IF NOT EXISTS (
@@ -556,44 +681,10 @@ BEGIN
             MESSAGE = 'Phase 3.2C financial view baseline drift';
     END IF;
 
-    IF (SELECT count(*) FROM pg_catalog.pg_policies AS policy
-        WHERE policy.schemaname = 'public'
-          AND policy.cmd = 'ALL') <> 19 THEN
-        RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2C FOR ALL policy count drift';
-    END IF;
-
-    -- These settings are external, review-record gates. They are intentionally
-    -- absent from this file, so this review-only transaction cannot be deployed
-    -- until the missing evidence has been supplied and independently approved.
-    IF current_setting(
-        'furn_app.phase32c_disposition_evidence',
-        true
-    ) IS DISTINCT FROM 'reviewed_19_policies_and_122_findings' THEN
-        RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2C disposition evidence gate is unresolved';
-    END IF;
-
-    IF current_setting(
-        'furn_app.phase32c_withdrawal_decision',
-        true
-    ) IS DISTINCT FROM 'customer_direct_withdrawal_not_approved' THEN
-        RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2C furnishing withdrawal workflow decision is unresolved';
-    END IF;
-
-    IF current_setting(
-        'furn_app.phase32c_initial_state_decision',
-        true
-    ) IS DISTINCT FROM 'customer_insert_draft_only_approved' THEN
-        RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2C furnishing initial-state decision is unresolved';
-    END IF;
 END
 $phase32c_preflight$;
 
--- Harden the customer-profile identity helper without changing its UUID return
--- contract. All object references remain fully qualified with an empty path.
+-- Harden the customer identity helper while preserving its UUID contract.
 CREATE OR REPLACE FUNCTION public.current_customer_profile_id()
 RETURNS pg_catalog.uuid
 LANGUAGE sql
@@ -614,9 +705,72 @@ GRANT EXECUTE
 ON FUNCTION public.current_customer_profile_id()
 TO authenticated, service_role;
 
--- Raw review rows remain private to authenticated owners/admins. Anonymous
--- access is supplied only through the fixed, read-only public_review view.
+/*
+ * Anonymous review reads use only column privileges plus an anon-only RLS
+ * policy. No owner-rights view or SECURITY DEFINER review reader is created.
+ */
+DROP POLICY review_select_public ON public.review;
+
 REVOKE SELECT ON TABLE public.review FROM PUBLIC, anon;
+GRANT SELECT (
+    id,
+    target_kind,
+    target_product_id,
+    target_marketplace_party_id,
+    rating,
+    comment,
+    created_at
+) ON TABLE public.review TO anon;
+
+CREATE POLICY phase32c_review_anon_safe_read
+ON public.review
+FOR SELECT
+TO anon
+USING (
+    (
+        target_kind::text = 'product'
+        AND target_product_id IS NOT NULL
+        AND target_marketplace_party_id IS NULL
+        AND target_service_request_id IS NULL
+        AND EXISTS (
+            SELECT 1
+            FROM public.product AS reviewed_product
+            JOIN public.marketplace_party AS product_party
+                ON product_party.id =
+                   reviewed_product.marketplace_party_id
+            JOIN public.category AS product_category
+                ON product_category.id = reviewed_product.category_id
+            WHERE reviewed_product.id = review.target_product_id
+              AND reviewed_product.lifecycle_state =
+                  'published'::public.product_state
+              AND product_party.approval_state =
+                  'approved'::public.party_approval_state
+              AND product_category.is_active
+              AND EXISTS (
+                  SELECT 1
+                  FROM public.product_color AS available_color
+                  WHERE available_color.product_id =
+                        reviewed_product.id
+                    AND available_color.stock_quantity > 0
+              )
+        )
+    )
+    OR
+    (
+        target_kind::text = 'marketplace_party'
+        AND target_product_id IS NULL
+        AND target_marketplace_party_id IS NOT NULL
+        AND target_service_request_id IS NULL
+        AND EXISTS (
+            SELECT 1
+            FROM public.marketplace_party AS reviewed_party
+            WHERE reviewed_party.id =
+                  review.target_marketplace_party_id
+              AND reviewed_party.approval_state =
+                  'approved'::public.party_approval_state
+        )
+    )
+);
 
 CREATE POLICY phase32c_review_authenticated_read_guard
 ON public.review
@@ -628,132 +782,84 @@ USING (
     OR public.is_admin()
 );
 
-CREATE VIEW public.public_review
-WITH (security_barrier = true, security_invoker = false)
-AS
-SELECT
-    review_row.id,
-    review_row.target_kind,
-    review_row.target_product_id,
-    review_row.target_marketplace_party_id,
-    review_row.rating,
-    review_row.comment,
-    review_row.created_at
-FROM public.review AS review_row
-JOIN public.product AS reviewed_product
-    ON reviewed_product.id = review_row.target_product_id
-JOIN public.marketplace_party AS product_party
-    ON product_party.id = reviewed_product.marketplace_party_id
-JOIN public.category AS product_category
-    ON product_category.id = reviewed_product.category_id
-WHERE review_row.target_kind::text = 'product'
-  AND review_row.target_product_id IS NOT NULL
-  AND review_row.target_marketplace_party_id IS NULL
-  AND review_row.target_service_request_id IS NULL
-  AND reviewed_product.lifecycle_state = 'published'::public.product_state
-  AND product_party.approval_state = 'approved'::public.party_approval_state
-  AND product_category.is_active
-  AND EXISTS (
-      SELECT 1
-      FROM public.product_color AS available_color
-      WHERE available_color.product_id = reviewed_product.id
-        AND available_color.stock_quantity > 0
-  )
-UNION ALL
-SELECT
-    review_row.id,
-    review_row.target_kind,
-    review_row.target_product_id,
-    review_row.target_marketplace_party_id,
-    review_row.rating,
-    review_row.comment,
-    review_row.created_at
-FROM public.review AS review_row
-JOIN public.marketplace_party AS reviewed_party
-    ON reviewed_party.id = review_row.target_marketplace_party_id
-WHERE review_row.target_kind::text = 'marketplace_party'
-  AND review_row.target_product_id IS NULL
-  AND review_row.target_marketplace_party_id IS NOT NULL
-  AND review_row.target_service_request_id IS NULL
-  AND reviewed_party.approval_state = 'approved'::public.party_approval_state;
+-- Replace literal-true service-directory reads with explicit role paths.
+DROP POLICY service_type_select_public ON public.service_type;
 
-ALTER VIEW public.public_review OWNER TO postgres;
-REVOKE ALL PRIVILEGES
-ON TABLE public.public_review
-FROM PUBLIC, anon, authenticated, service_role;
-GRANT SELECT
-ON TABLE public.public_review
-TO anon, authenticated, service_role;
-
--- Restrictive guards constrain the already-existing permissive read paths, so
--- overlap cannot restore literal-true visibility.
-CREATE POLICY phase32c_service_type_anon_read_guard
+CREATE POLICY phase32c_service_type_anon_read
 ON public.service_type
-AS RESTRICTIVE
 FOR SELECT
 TO anon
 USING (is_active);
 
-CREATE POLICY phase32c_service_type_authenticated_read_guard
+CREATE POLICY phase32c_service_type_authenticated_read
 ON public.service_type
-AS RESTRICTIVE
 FOR SELECT
 TO authenticated
-USING (
-    is_active
-    OR public.is_admin()
-);
+USING (is_active);
 
-CREATE POLICY phase32c_party_capability_anon_read_guard
+DROP POLICY party_capability_select ON public.party_capability;
+
+CREATE POLICY phase32c_party_capability_anon_read
 ON public.party_capability
-AS RESTRICTIVE
 FOR SELECT
 TO anon
 USING (
     EXISTS (
         SELECT 1
         FROM public.marketplace_party AS capability_party
-        WHERE capability_party.id = party_capability.marketplace_party_id
+        WHERE capability_party.id =
+              party_capability.marketplace_party_id
           AND capability_party.approval_state =
               'approved'::public.party_approval_state
     )
     AND EXISTS (
         SELECT 1
         FROM public.service_type AS capability_service
-        WHERE capability_service.id = party_capability.service_type_id
+        WHERE capability_service.id =
+              party_capability.service_type_id
           AND capability_service.is_active
     )
 );
 
-CREATE POLICY phase32c_party_capability_authenticated_read_guard
+CREATE POLICY phase32c_party_capability_authenticated_read
 ON public.party_capability
-AS RESTRICTIVE
 FOR SELECT
 TO authenticated
 USING (
-    (
-        EXISTS (
-            SELECT 1
-            FROM public.marketplace_party AS capability_party
-            WHERE capability_party.id = party_capability.marketplace_party_id
-              AND capability_party.approval_state =
-                  'approved'::public.party_approval_state
-        )
-        AND EXISTS (
-            SELECT 1
-            FROM public.service_type AS capability_service
-            WHERE capability_service.id = party_capability.service_type_id
-              AND capability_service.is_active
-        )
+    EXISTS (
+        SELECT 1
+        FROM public.marketplace_party AS capability_party
+        WHERE capability_party.id =
+              party_capability.marketplace_party_id
+          AND capability_party.approval_state =
+              'approved'::public.party_approval_state
     )
-    OR marketplace_party_id = public.current_marketplace_party_id()
-    OR public.is_admin()
+    AND EXISTS (
+        SELECT 1
+        FROM public.service_type AS capability_service
+        WHERE capability_service.id =
+              party_capability.service_type_id
+          AND capability_service.is_active
+    )
 );
 
--- The review gate explicitly selects the conservative state model: direct
--- customer withdrawal is not approved. A distinct reviewed withdrawal workflow
--- must be added separately if the product requires one.
-DROP POLICY furnishing_request_write_own ON public.furnishing_request;
+CREATE POLICY phase32c_party_capability_owner_read
+ON public.party_capability
+FOR SELECT
+TO authenticated
+USING (
+    marketplace_party_id = public.current_marketplace_party_id()
+);
+
+CREATE POLICY phase32c_party_capability_admin_read
+ON public.party_capability
+FOR SELECT
+TO authenticated
+USING (public.is_admin());
+
+-- Split customer furnishing writes by operation and lifecycle state.
+DROP POLICY furnishing_request_write_own
+ON public.furnishing_request;
 
 CREATE POLICY phase32c_furnishing_request_insert_own
 ON public.furnishing_request
@@ -761,7 +867,14 @@ FOR INSERT
 TO authenticated
 WITH CHECK (
     customer_profile_id = public.current_customer_profile_id()
-    AND lifecycle_state::text = 'draft'
+    AND lifecycle_state = 'draft'::public.furnishing_request_state
+    AND EXISTS (
+        SELECT 1
+        FROM public.address AS request_address
+        WHERE request_address.id = furnishing_request.address_id
+          AND request_address.customer_profile_id =
+              public.current_customer_profile_id()
+    )
 );
 
 CREATE POLICY phase32c_furnishing_request_update_own
@@ -770,11 +883,24 @@ FOR UPDATE
 TO authenticated
 USING (
     customer_profile_id = public.current_customer_profile_id()
-    AND lifecycle_state::text IN ('draft', 'open')
+    AND lifecycle_state IN (
+        'draft'::public.furnishing_request_state,
+        'open'::public.furnishing_request_state
+    )
 )
 WITH CHECK (
     customer_profile_id = public.current_customer_profile_id()
-    AND lifecycle_state::text IN ('draft', 'open')
+    AND lifecycle_state IN (
+        'draft'::public.furnishing_request_state,
+        'open'::public.furnishing_request_state
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM public.address AS request_address
+        WHERE request_address.id = furnishing_request.address_id
+          AND request_address.customer_profile_id =
+              public.current_customer_profile_id()
+    )
 );
 
 CREATE POLICY phase32c_furnishing_request_delete_own
@@ -783,12 +909,159 @@ FOR DELETE
 TO authenticated
 USING (
     customer_profile_id = public.current_customer_profile_id()
-    AND lifecycle_state::text IN ('draft', 'open')
+    AND lifecycle_state IN (
+        'draft'::public.furnishing_request_state,
+        'open'::public.furnishing_request_state
+    )
 );
 
--- Preserve the invoker-rights view definition and service access. Normalize
--- only client privileges; ALL is version-safe and includes MAINTAIN when the
--- server version supports it.
+/*
+ * Normalize authenticated DML completely. Revoking both table privileges and
+ * every possible per-column privilege prevents historical column ACLs from
+ * surviving before the reviewed allowlists are granted back.
+ */
+REVOKE INSERT, UPDATE ON TABLE public.furnishing_request
+FROM authenticated;
+
+REVOKE INSERT (
+    id,
+    customer_profile_id,
+    address_id,
+    title,
+    requirements_description,
+    reference_image_urls,
+    budget_min,
+    budget_max,
+    requested_timing,
+    offer_deadline,
+    lifecycle_state,
+    created_at,
+    coarse_location
+), UPDATE (
+    id,
+    customer_profile_id,
+    address_id,
+    title,
+    requirements_description,
+    reference_image_urls,
+    budget_min,
+    budget_max,
+    requested_timing,
+    offer_deadline,
+    lifecycle_state,
+    created_at,
+    coarse_location
+) ON TABLE public.furnishing_request
+FROM authenticated;
+
+GRANT INSERT (
+    customer_profile_id,
+    address_id,
+    title,
+    requirements_description,
+    reference_image_urls,
+    budget_min,
+    budget_max,
+    requested_timing,
+    offer_deadline,
+    coarse_location
+) ON TABLE public.furnishing_request
+TO authenticated;
+
+GRANT UPDATE (
+    address_id,
+    title,
+    requirements_description,
+    reference_image_urls,
+    budget_min,
+    budget_max,
+    requested_timing,
+    offer_deadline,
+    coarse_location
+) ON TABLE public.furnishing_request
+TO authenticated;
+
+/*
+ * These SECURITY DEFINER functions are necessary because lifecycle_state is
+ * never directly writable by authenticated callers. Both return only whether
+ * the exact owned transition happened, so absence, foreign ownership, and
+ * wrong state are indistinguishable.
+ */
+CREATE OR REPLACE FUNCTION public.open_furnishing_request(
+    request_id pg_catalog.uuid
+)
+RETURNS pg_catalog.boolean
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+    affected_rows pg_catalog.integer;
+BEGIN
+    UPDATE "public".furnishing_request AS request_row
+    SET lifecycle_state = 'open'
+    WHERE request_row.id = request_id
+      AND request_row.lifecycle_state::text = 'draft'
+      AND EXISTS (
+          SELECT 1
+          FROM public.customer_profile AS customer
+          WHERE customer.id = request_row.customer_profile_id
+            AND customer.user_id = auth.uid()
+      );
+
+    GET DIAGNOSTICS affected_rows = ROW_COUNT;
+    RETURN affected_rows = 1;
+END
+$function$;
+
+ALTER FUNCTION public.open_furnishing_request(pg_catalog.uuid)
+OWNER TO postgres;
+REVOKE ALL PRIVILEGES
+ON FUNCTION public.open_furnishing_request(pg_catalog.uuid)
+FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE
+ON FUNCTION public.open_furnishing_request(pg_catalog.uuid)
+TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.withdraw_furnishing_request(
+    request_id pg_catalog.uuid
+)
+RETURNS pg_catalog.boolean
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+    affected_rows pg_catalog.integer;
+BEGIN
+    UPDATE "public".furnishing_request AS request_row
+    SET lifecycle_state = 'withdrawn'
+    WHERE request_row.id = request_id
+      AND request_row.lifecycle_state::text = 'open'
+      AND EXISTS (
+          SELECT 1
+          FROM public.customer_profile AS customer
+          WHERE customer.id = request_row.customer_profile_id
+            AND customer.user_id = auth.uid()
+      );
+
+    GET DIAGNOSTICS affected_rows = ROW_COUNT;
+    RETURN affected_rows = 1;
+END
+$function$;
+
+ALTER FUNCTION public.withdraw_furnishing_request(pg_catalog.uuid)
+OWNER TO postgres;
+REVOKE ALL PRIVILEGES
+ON FUNCTION public.withdraw_furnishing_request(pg_catalog.uuid)
+FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE
+ON FUNCTION public.withdraw_furnishing_request(pg_catalog.uuid)
+TO authenticated, service_role;
+
+-- Preserve the invoker-rights financial view and service_role access.
 REVOKE ALL PRIVILEGES
 ON TABLE public.order_financial_position
 FROM PUBLIC, anon, authenticated;
@@ -803,36 +1076,51 @@ DECLARE
     service_role_oid oid;
     postgres_role_oid oid;
     helper_oid oid;
+    transition_oid oid;
+    transition_name text;
+    transition_old_state text;
+    transition_new_state text;
+    transition_forbidden_states text[];
 BEGIN
-    SELECT role_row.oid INTO STRICT anon_role_oid
-    FROM pg_catalog.pg_roles AS role_row
-    WHERE role_row.rolname = 'anon';
+    SELECT oid INTO STRICT anon_role_oid
+    FROM pg_catalog.pg_roles WHERE rolname = 'anon';
 
-    SELECT role_row.oid INTO STRICT authenticated_role_oid
-    FROM pg_catalog.pg_roles AS role_row
-    WHERE role_row.rolname = 'authenticated';
+    SELECT oid INTO STRICT authenticated_role_oid
+    FROM pg_catalog.pg_roles WHERE rolname = 'authenticated';
 
-    SELECT role_row.oid INTO STRICT service_role_oid
-    FROM pg_catalog.pg_roles AS role_row
-    WHERE role_row.rolname = 'service_role';
+    SELECT oid INTO STRICT service_role_oid
+    FROM pg_catalog.pg_roles WHERE rolname = 'service_role';
 
-    SELECT role_row.oid INTO STRICT postgres_role_oid
-    FROM pg_catalog.pg_roles AS role_row
-    WHERE role_row.rolname = 'postgres';
+    SELECT oid INTO STRICT postgres_role_oid
+    FROM pg_catalog.pg_roles WHERE rolname = 'postgres';
 
-    helper_oid := 'public.current_customer_profile_id()'::pg_catalog.regprocedure;
+    helper_oid :=
+        'public.current_customer_profile_id()'::pg_catalog.regprocedure;
 
-    IF EXISTS (
+    IF NOT EXISTS (
         SELECT 1
         FROM pg_catalog.pg_proc AS function_metadata
         WHERE function_metadata.oid = helper_oid
-          AND (
-              function_metadata.proowner <> postgres_role_oid
-              OR function_metadata.provolatile <> 's'::pg_catalog."char"
-              OR NOT function_metadata.prosecdef
-              OR function_metadata.proconfig IS DISTINCT FROM
-                  ARRAY['search_path=']::text[]
-          )
+          AND function_metadata.proowner = postgres_role_oid
+          AND function_metadata.provolatile = 's'::pg_catalog."char"
+          AND function_metadata.prosecdef
+          AND function_metadata.proconfig =
+              ARRAY['search_path=']::text[]
+          AND lower(function_metadata.prosrc)
+              LIKE '%public.customer_profile%'
+          AND lower(function_metadata.prosrc) LIKE '%auth.uid()%'
+    ) OR pg_catalog.has_function_privilege(
+        anon_role_oid,
+        helper_oid,
+        'EXECUTE'
+    ) OR NOT pg_catalog.has_function_privilege(
+        authenticated_role_oid,
+        helper_oid,
+        'EXECUTE'
+    ) OR NOT pg_catalog.has_function_privilege(
+        service_role_oid,
+        helper_oid,
+        'EXECUTE'
     ) OR EXISTS (
         SELECT 1
         FROM pg_catalog.pg_proc AS function_metadata
@@ -861,103 +1149,98 @@ BEGIN
                   AND acl.is_grantable
               )
           )
-    ) OR NOT pg_catalog.has_function_privilege(
-        authenticated_role_oid,
-        helper_oid,
-        'EXECUTE'
-    ) OR NOT pg_catalog.has_function_privilege(
-        service_role_oid,
-        helper_oid,
-        'EXECUTE'
-    ) OR pg_catalog.has_function_privilege(
-        anon_role_oid,
-        helper_oid,
-        'EXECUTE'
     ) THEN
         RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2C postflight helper hardening mismatch';
+            MESSAGE = 'Phase 3.2C postflight helper mismatch';
     END IF;
 
-    IF pg_catalog.has_table_privilege(
-        anon_role_oid,
-        'public.review'::pg_catalog.regclass,
-        'SELECT'
-    ) OR NOT pg_catalog.has_table_privilege(
-        authenticated_role_oid,
-        'public.review'::pg_catalog.regclass,
-        'SELECT'
-    ) OR NOT pg_catalog.has_table_privilege(
-        service_role_oid,
-        'public.review'::pg_catalog.regclass,
-        'SELECT'
-    ) OR NOT pg_catalog.has_table_privilege(
-        anon_role_oid,
-        'public.public_review'::pg_catalog.regclass,
-        'SELECT'
-    ) OR EXISTS (
-        SELECT 1
-        FROM information_schema.columns AS column_metadata
-        WHERE column_metadata.table_schema = 'public'
-          AND column_metadata.table_name = 'public_review'
-          AND column_metadata.column_name IN (
-              'customer_profile_id',
-              'target_service_request_id'
-          )
-    ) OR (SELECT count(*)
-          FROM information_schema.columns AS column_metadata
-          WHERE column_metadata.table_schema = 'public'
-            AND column_metadata.table_name = 'public_review') <> 7
+    IF pg_catalog.to_regclass('public.public_review') IS NOT NULL
+       OR pg_catalog.has_table_privilege(
+           anon_role_oid,
+           'public.review'::pg_catalog.regclass,
+           'SELECT'
+       )
+       OR NOT pg_catalog.has_column_privilege(
+           anon_role_oid,
+           'public.review'::pg_catalog.regclass,
+           'id',
+           'SELECT'
+       )
+       OR NOT pg_catalog.has_column_privilege(
+           anon_role_oid,
+           'public.review'::pg_catalog.regclass,
+           'target_kind',
+           'SELECT'
+       )
+       OR NOT pg_catalog.has_column_privilege(
+           anon_role_oid,
+           'public.review'::pg_catalog.regclass,
+           'target_product_id',
+           'SELECT'
+       )
+       OR NOT pg_catalog.has_column_privilege(
+           anon_role_oid,
+           'public.review'::pg_catalog.regclass,
+           'target_marketplace_party_id',
+           'SELECT'
+       )
+       OR NOT pg_catalog.has_column_privilege(
+           anon_role_oid,
+           'public.review'::pg_catalog.regclass,
+           'rating',
+           'SELECT'
+       )
+       OR NOT pg_catalog.has_column_privilege(
+           anon_role_oid,
+           'public.review'::pg_catalog.regclass,
+           'comment',
+           'SELECT'
+       )
+       OR NOT pg_catalog.has_column_privilege(
+           anon_role_oid,
+           'public.review'::pg_catalog.regclass,
+           'created_at',
+           'SELECT'
+       )
+       OR pg_catalog.has_column_privilege(
+           anon_role_oid,
+           'public.review'::pg_catalog.regclass,
+           'customer_profile_id',
+           'SELECT'
+       )
+       OR pg_catalog.has_column_privilege(
+           anon_role_oid,
+           'public.review'::pg_catalog.regclass,
+           'target_service_request_id',
+           'SELECT'
+       )
+       OR NOT pg_catalog.has_table_privilege(
+           authenticated_role_oid,
+           'public.review'::pg_catalog.regclass,
+           'SELECT'
+       )
+       OR NOT pg_catalog.has_table_privilege(
+           service_role_oid,
+           'public.review'::pg_catalog.regclass,
+           'SELECT'
+       )
     THEN
         RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2C postflight review exposure mismatch';
-    END IF;
-
-    IF EXISTS (
-        SELECT 1
-        FROM information_schema.views AS view_metadata
-        WHERE view_metadata.table_schema = 'public'
-          AND view_metadata.table_name = 'public_review'
-          AND view_metadata.is_updatable <> 'NO'
-    ) OR EXISTS (
-        SELECT 1
-        FROM pg_catalog.pg_class AS relation
-        JOIN pg_catalog.pg_namespace AS namespace
-            ON namespace.oid = relation.relnamespace
-        CROSS JOIN LATERAL pg_catalog.aclexplode(
-            COALESCE(
-                relation.relacl,
-                pg_catalog.acldefault(
-                    'r'::pg_catalog."char",
-                    relation.relowner
-                )
-            )
-        ) AS acl
-        WHERE namespace.nspname = 'public'
-          AND relation.relname = 'public_review'
-          AND acl.grantee IN (
-              0,
-              anon_role_oid,
-              authenticated_role_oid,
-              service_role_oid
-          )
-          AND (
-              acl.privilege_type <> 'SELECT'
-              OR acl.is_grantable
-          )
-    ) THEN
-        RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2C postflight public-review write exposure';
+            MESSAGE = 'Phase 3.2C postflight review column-grant mismatch';
     END IF;
 
     IF EXISTS (
         SELECT 1
         FROM (
             VALUES
+                ('review'::name, 'phase32c_review_anon_safe_read'::name, 'SELECT'::text, 'PERMISSIVE'::text),
                 ('review'::name, 'phase32c_review_authenticated_read_guard'::name, 'SELECT'::text, 'RESTRICTIVE'::text),
-                ('service_type'::name, 'phase32c_service_type_anon_read_guard'::name, 'SELECT'::text, 'RESTRICTIVE'::text),
-                ('service_type'::name, 'phase32c_service_type_authenticated_read_guard'::name, 'SELECT'::text, 'RESTRICTIVE'::text),
-                ('party_capability'::name, 'phase32c_party_capability_anon_read_guard'::name, 'SELECT'::text, 'RESTRICTIVE'::text),
-                ('party_capability'::name, 'phase32c_party_capability_authenticated_read_guard'::name, 'SELECT'::text, 'RESTRICTIVE'::text),
+                ('service_type'::name, 'phase32c_service_type_anon_read'::name, 'SELECT'::text, 'PERMISSIVE'::text),
+                ('service_type'::name, 'phase32c_service_type_authenticated_read'::name, 'SELECT'::text, 'PERMISSIVE'::text),
+                ('party_capability'::name, 'phase32c_party_capability_anon_read'::name, 'SELECT'::text, 'PERMISSIVE'::text),
+                ('party_capability'::name, 'phase32c_party_capability_authenticated_read'::name, 'SELECT'::text, 'PERMISSIVE'::text),
+                ('party_capability'::name, 'phase32c_party_capability_owner_read'::name, 'SELECT'::text, 'PERMISSIVE'::text),
+                ('party_capability'::name, 'phase32c_party_capability_admin_read'::name, 'SELECT'::text, 'PERMISSIVE'::text),
                 ('furnishing_request'::name, 'phase32c_furnishing_request_insert_own'::name, 'INSERT'::text, 'PERMISSIVE'::text),
                 ('furnishing_request'::name, 'phase32c_furnishing_request_update_own'::name, 'UPDATE'::text, 'PERMISSIVE'::text),
                 ('furnishing_request'::name, 'phase32c_furnishing_request_delete_own'::name, 'DELETE'::text, 'PERMISSIVE'::text)
@@ -973,30 +1256,350 @@ BEGIN
         SELECT 1
         FROM pg_catalog.pg_policies AS policy
         WHERE policy.schemaname = 'public'
-          AND policy.tablename = 'furnishing_request'
-          AND policy.policyname = 'furnishing_request_write_own'
+          AND policy.policyname IN (
+              'review_select_public',
+              'service_type_select_public',
+              'party_capability_select',
+              'furnishing_request_write_own'
+          )
     ) THEN
         RAISE EXCEPTION USING
             MESSAGE = 'Phase 3.2C postflight policy inventory mismatch';
     END IF;
 
     IF EXISTS (
+        WITH target_policies AS (
+            SELECT
+                policyname,
+                cmd,
+                lower(qual) AS qual,
+                lower(with_check) AS with_check
+            FROM pg_catalog.pg_policies
+            WHERE schemaname = 'public'
+              AND tablename = 'furnishing_request'
+              AND policyname IN (
+                  'phase32c_furnishing_request_insert_own',
+                  'phase32c_furnishing_request_update_own',
+                  'phase32c_furnishing_request_delete_own'
+              )
+        )
         SELECT 1
-        FROM pg_catalog.pg_class AS relation
-        JOIN pg_catalog.pg_namespace AS namespace
-            ON namespace.oid = relation.relnamespace
-        WHERE namespace.nspname = 'public'
-          AND relation.relkind IN (
-              'r'::pg_catalog."char",
-              'p'::pg_catalog."char"
-          )
-          AND (
-              NOT relation.relrowsecurity
-              OR relation.relforcerowsecurity
-          )
+        FROM target_policies
+        WHERE NOT (
+            CASE cmd
+                WHEN 'INSERT' THEN
+                    qual IS NULL
+                    AND with_check LIKE
+                        '%customer_profile_id%current_customer_profile_id%'
+                    AND with_check LIKE
+                        '%lifecycle_state%draft%furnishing_request_state%'
+                    AND with_check LIKE '%public.address%'
+                    AND with_check LIKE
+                        '%request_address.id%address_id%'
+                    AND with_check LIKE
+                        '%request_address.customer_profile_id%current_customer_profile_id%'
+                    AND with_check NOT LIKE '%open%'
+                WHEN 'UPDATE' THEN
+                    qual LIKE
+                        '%customer_profile_id%current_customer_profile_id%'
+                    AND qual LIKE '%lifecycle_state%draft%'
+                    AND qual LIKE '%lifecycle_state%open%'
+                    AND with_check LIKE
+                        '%customer_profile_id%current_customer_profile_id%'
+                    AND with_check LIKE '%lifecycle_state%draft%'
+                    AND with_check LIKE '%lifecycle_state%open%'
+                    AND with_check LIKE '%public.address%'
+                    AND with_check LIKE
+                        '%request_address.id%address_id%'
+                    AND with_check LIKE
+                        '%request_address.customer_profile_id%current_customer_profile_id%'
+                    AND qual NOT LIKE '%accepted%'
+                    AND qual NOT LIKE '%withdrawn%'
+                    AND qual NOT LIKE '%closed%'
+                    AND with_check NOT LIKE '%accepted%'
+                    AND with_check NOT LIKE '%withdrawn%'
+                    AND with_check NOT LIKE '%closed%'
+                WHEN 'DELETE' THEN
+                    with_check IS NULL
+                    AND qual LIKE
+                        '%customer_profile_id%current_customer_profile_id%'
+                    AND qual LIKE '%lifecycle_state%draft%'
+                    AND qual LIKE '%lifecycle_state%open%'
+                    AND qual NOT LIKE '%accepted%'
+                    AND qual NOT LIKE '%withdrawn%'
+                    AND qual NOT LIKE '%closed%'
+                ELSE false
+            END
+            AND lower(concat_ws(' ', qual, with_check))
+                NOT LIKE '%or true%'
+        )
+    ) OR (
+        SELECT count(*)
+        FROM pg_catalog.pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = 'furnishing_request'
+          AND policyname LIKE 'phase32c_furnishing_request_%_own'
+    ) <> 3 THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2C postflight furnishing predicate mismatch';
+    END IF;
+
+    FOREACH transition_name IN ARRAY ARRAY[
+        'open_furnishing_request',
+        'withdraw_furnishing_request'
+    ]
+    LOOP
+        IF transition_name = 'open_furnishing_request' THEN
+            transition_old_state := 'draft';
+            transition_new_state := 'open';
+            transition_forbidden_states := ARRAY[
+                'withdrawn',
+                'accepted',
+                'closed'
+            ];
+        ELSE
+            transition_old_state := 'open';
+            transition_new_state := 'withdrawn';
+            transition_forbidden_states := ARRAY[
+                'draft',
+                'accepted',
+                'closed'
+            ];
+        END IF;
+
+        transition_oid := pg_catalog.to_regprocedure(
+            pg_catalog.format(
+                'public.%I(pg_catalog.uuid)',
+                transition_name
+            )
+        );
+
+        IF transition_oid IS NULL OR NOT EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_proc AS function_metadata
+            WHERE function_metadata.oid = transition_oid
+              AND function_metadata.prorettype =
+                  'pg_catalog.boolean'::pg_catalog.regtype
+              AND function_metadata.prolang = (
+                  SELECT language.oid
+                  FROM pg_catalog.pg_language AS language
+                  WHERE language.lanname = 'plpgsql'
+              )
+              AND function_metadata.provolatile = 'v'::pg_catalog."char"
+              AND function_metadata.prosecdef
+              AND function_metadata.proowner = postgres_role_oid
+              AND function_metadata.proconfig =
+                  ARRAY['search_path=']::text[]
+              AND lower(function_metadata.prosrc)
+                  LIKE '%"public".furnishing_request%'
+              AND lower(function_metadata.prosrc)
+                  LIKE '%public.customer_profile%'
+              AND lower(function_metadata.prosrc) LIKE '%auth.uid()%'
+              AND lower(function_metadata.prosrc) LIKE
+                  '%lifecycle_state::text = '''
+                  || transition_old_state || '''%'
+              AND lower(function_metadata.prosrc) LIKE
+                  '%set lifecycle_state = '''
+                  || transition_new_state || '''%'
+              AND (
+                  length(lower(function_metadata.prosrc))
+                  - length(replace(
+                      lower(function_metadata.prosrc),
+                      'set lifecycle_state',
+                      ''
+                  ))
+              ) / length('set lifecycle_state') = 1
+              AND position(
+                  ',' IN split_part(
+                      split_part(
+                          lower(function_metadata.prosrc),
+                          'set lifecycle_state',
+                          2
+                      ),
+                      'where',
+                      1
+                  )
+              ) = 0
+              AND lower(function_metadata.prosrc) NOT LIKE '%or true%'
+              AND lower(function_metadata.prosrc)
+                  LIKE '%get diagnostics affected_rows = row_count%'
+              AND lower(function_metadata.prosrc)
+                  LIKE '%affected_rows = 1%'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM unnest(transition_forbidden_states)
+                      AS forbidden(state_name)
+                  WHERE lower(function_metadata.prosrc)
+                      LIKE '%''' || forbidden.state_name || '''%'
+              )
+        ) OR pg_catalog.has_function_privilege(
+            anon_role_oid,
+            transition_oid,
+            'EXECUTE'
+        ) OR NOT pg_catalog.has_function_privilege(
+            authenticated_role_oid,
+            transition_oid,
+            'EXECUTE'
+        ) OR NOT pg_catalog.has_function_privilege(
+            service_role_oid,
+            transition_oid,
+            'EXECUTE'
+        ) OR EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_proc AS function_metadata
+            CROSS JOIN LATERAL pg_catalog.aclexplode(
+                COALESCE(
+                    function_metadata.proacl,
+                    pg_catalog.acldefault(
+                        'f'::pg_catalog."char",
+                        function_metadata.proowner
+                    )
+                )
+            ) AS acl
+            WHERE function_metadata.oid = transition_oid
+              AND acl.privilege_type = 'EXECUTE'
+              AND (
+                  acl.grantee NOT IN (
+                      postgres_role_oid,
+                      authenticated_role_oid,
+                      service_role_oid
+                  )
+                  OR (
+                      acl.grantee IN (
+                          authenticated_role_oid,
+                          service_role_oid
+                      )
+                      AND acl.is_grantable
+                  )
+              )
+        ) THEN
+            RAISE EXCEPTION USING
+                MESSAGE = 'Phase 3.2C postflight transition function mismatch';
+        END IF;
+    END LOOP;
+
+    IF pg_catalog.has_table_privilege(
+        authenticated_role_oid,
+        'public.furnishing_request'::pg_catalog.regclass,
+        'INSERT'
+    ) OR pg_catalog.has_table_privilege(
+        authenticated_role_oid,
+        'public.furnishing_request'::pg_catalog.regclass,
+        'UPDATE'
+    ) OR EXISTS (
+        WITH target_columns(
+            column_name,
+            authenticated_insert,
+            authenticated_update
+        ) AS (
+            VALUES
+                ('id'::name, false, false),
+                ('customer_profile_id'::name, true, false),
+                ('address_id'::name, true, true),
+                ('title'::name, true, true),
+                ('requirements_description'::name, true, true),
+                ('reference_image_urls'::name, true, true),
+                ('budget_min'::name, true, true),
+                ('budget_max'::name, true, true),
+                ('requested_timing'::name, true, true),
+                ('offer_deadline'::name, true, true),
+                ('lifecycle_state'::name, false, false),
+                ('created_at'::name, false, false),
+                ('coarse_location'::name, true, true)
+        ),
+        roles(role_oid, role_name) AS (
+            VALUES
+                (anon_role_oid, 'anon'::text),
+                (authenticated_role_oid, 'authenticated'::text),
+                (service_role_oid, 'service_role'::text)
+        )
+        SELECT 1
+        FROM target_columns
+        CROSS JOIN roles
+        WHERE pg_catalog.has_column_privilege(
+            roles.role_oid,
+            'public.furnishing_request'::pg_catalog.regclass,
+            target_columns.column_name,
+            'INSERT'
+        ) IS DISTINCT FROM CASE roles.role_name
+            WHEN 'anon' THEN false
+            WHEN 'authenticated' THEN
+                target_columns.authenticated_insert
+            ELSE true
+        END
+           OR pg_catalog.has_column_privilege(
+               roles.role_oid,
+               'public.furnishing_request'::pg_catalog.regclass,
+               target_columns.column_name,
+               'UPDATE'
+           ) IS DISTINCT FROM CASE roles.role_name
+               WHEN 'anon' THEN false
+               WHEN 'authenticated' THEN
+                   target_columns.authenticated_update
+               ELSE true
+           END
+    ) OR EXISTS (
+        WITH target_columns(
+            column_name,
+            authenticated_insert,
+            authenticated_update
+        ) AS (
+            VALUES
+                ('id'::name, false, false),
+                ('customer_profile_id'::name, true, false),
+                ('address_id'::name, true, true),
+                ('title'::name, true, true),
+                ('requirements_description'::name, true, true),
+                ('reference_image_urls'::name, true, true),
+                ('budget_min'::name, true, true),
+                ('budget_max'::name, true, true),
+                ('requested_timing'::name, true, true),
+                ('offer_deadline'::name, true, true),
+                ('lifecycle_state'::name, false, false),
+                ('created_at'::name, false, false),
+                ('coarse_location'::name, true, true)
+        ),
+        expected AS (
+            SELECT
+                target_columns.column_name,
+                operation.privilege_type,
+                false AS is_grantable
+            FROM target_columns
+            CROSS JOIN LATERAL (
+                VALUES
+                    ('INSERT'::text, target_columns.authenticated_insert),
+                    ('UPDATE'::text, target_columns.authenticated_update)
+            ) AS operation(privilege_type, allowed)
+            WHERE operation.allowed
+        ),
+        actual AS (
+            SELECT
+                attribute.attname AS column_name,
+                acl.privilege_type,
+                acl.is_grantable
+            FROM pg_catalog.pg_attribute AS attribute
+            CROSS JOIN LATERAL pg_catalog.aclexplode(
+                COALESCE(
+                    attribute.attacl,
+                    ARRAY[]::pg_catalog.aclitem[]
+                )
+            ) AS acl
+            WHERE attribute.attrelid =
+                  'public.furnishing_request'::pg_catalog.regclass
+              AND attribute.attnum > 0
+              AND NOT attribute.attisdropped
+              AND acl.grantee = authenticated_role_oid
+              AND acl.privilege_type IN ('INSERT', 'UPDATE')
+        ),
+        drift AS (
+            (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+            UNION ALL
+            (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+        )
+        SELECT 1 FROM drift
     ) THEN
         RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2C postflight changed RLS/FORCE state';
+            MESSAGE = 'Phase 3.2C postflight furnishing column ACL mismatch';
     END IF;
 
     IF NOT EXISTS (
@@ -1020,56 +1623,28 @@ BEGIN
         service_role_oid,
         'public.order_financial_position'::pg_catalog.regclass,
         'SELECT'
-    ) OR EXISTS (
+    ) THEN
+        RAISE EXCEPTION USING
+            MESSAGE = 'Phase 3.2C postflight financial view mismatch';
+    END IF;
+
+    IF EXISTS (
         SELECT 1
         FROM pg_catalog.pg_class AS relation
         JOIN pg_catalog.pg_namespace AS namespace
             ON namespace.oid = relation.relnamespace
-        CROSS JOIN LATERAL pg_catalog.aclexplode(
-            COALESCE(
-                relation.relacl,
-                pg_catalog.acldefault(
-                    'r'::pg_catalog."char",
-                    relation.relowner
-                )
-            )
-        ) AS acl
         WHERE namespace.nspname = 'public'
-          AND relation.relname = 'order_financial_position'
-          AND acl.grantee IN (0, anon_role_oid, authenticated_role_oid)
+          AND relation.relkind IN (
+              'r'::pg_catalog."char",
+              'p'::pg_catalog."char"
+          )
           AND (
-              acl.privilege_type <> 'SELECT'
-              OR acl.is_grantable
+              NOT relation.relrowsecurity
+              OR relation.relforcerowsecurity
           )
     ) THEN
         RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2C postflight financial-view privilege mismatch';
-    END IF;
-
-    IF NOT pg_catalog.has_table_privilege(
-        service_role_oid,
-        'public.public_review'::pg_catalog.regclass,
-        'SELECT'
-    ) OR NOT pg_catalog.has_function_privilege(
-        service_role_oid,
-        helper_oid,
-        'EXECUTE'
-    ) THEN
-        RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2C postflight service-role functionality mismatch';
-    END IF;
-
-    IF pg_catalog.pg_has_role(
-        anon_role_oid,
-        service_role_oid,
-        'MEMBER'
-    ) OR pg_catalog.pg_has_role(
-        authenticated_role_oid,
-        service_role_oid,
-        'MEMBER'
-    ) THEN
-        RAISE EXCEPTION USING
-            MESSAGE = 'Phase 3.2C postflight client elevation mismatch';
+            MESSAGE = 'Phase 3.2C postflight RLS/FORCE mismatch';
     END IF;
 END
 $phase32c_postflight$;

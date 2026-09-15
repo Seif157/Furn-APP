@@ -16,7 +16,7 @@ from pydantic import SecretStr
 from app.config import Settings, load_settings
 from scripts import live_rls_acceptance as base
 
-PUBLIC_REVIEW_FIELDS = (
+SAFE_REVIEW_FIELDS = (
     "id",
     "target_kind",
     "target_product_id",
@@ -39,8 +39,19 @@ RAW_REVIEW_FIELDS = (
 FURNISHING_REQUEST_FIELDS = (
     "id",
     "customer_profile_id",
+    "address_id",
+    "title",
+    "requirements_description",
+    "reference_image_urls",
+    "budget_min",
+    "budget_max",
+    "requested_timing",
+    "offer_deadline",
     "lifecycle_state",
+    "created_at",
+    "coarse_location",
 )
+FURNISHING_EDITABLE_PROBE_COLUMN = "coarse_location"
 LOCKED_FURNISHING_STATES = ("accepted", "withdrawn", "closed")
 MAX_ACCEPTANCE_ROWS = 100
 
@@ -49,7 +60,7 @@ MAX_ACCEPTANCE_ROWS = 100
 class Phase32CFixtures:
     """All private values required before the first no-op PATCH."""
 
-    editable_request: base.RecordSnapshot
+    editable_requests: tuple[base.RecordSnapshot, ...]
     locked_requests: tuple[base.RecordSnapshot, ...]
 
 
@@ -75,43 +86,61 @@ def _uuid_set(
 async def verify_anonymous_review_boundary(
     api: base.PostgrestAcceptanceClient,
 ) -> None:
-    """Prove raw denial and cross-check the fixed public projection."""
+    """Prove exact safe-column access and cross-check anonymous RLS scope."""
 
-    raw_response = await api.get_relation(
-        "review",
-        params={"select": "id", "limit": "1"},
+    helper_response = await api.get_rpc(
+        "current_customer_profile_id",
         session=None,
-        check="anonymous_raw_review_denial",
+        check="anonymous_customer_helper_denial",
         actor="anonymous",
     )
-    if raw_response.status_code not in base.SAFE_PERMISSION_STATUSES:
+    if helper_response.status_code not in base.SAFE_PERMISSION_STATUSES:
         raise base.AcceptanceFailure(
-            check="anonymous_raw_review_denial",
+            check="anonymous_customer_helper_denial",
             actor="anonymous",
-            classification="raw_review_accessible",
-            http_status=raw_response.status_code,
+            classification="restricted_helper_executable",
+            http_status=helper_response.status_code,
         )
     base.report_result(
-        check="anonymous_raw_review_denial",
+        check="anonymous_customer_helper_denial",
         actor="anonymous",
         status="passed",
     )
 
+    for sensitive_column in (
+        "customer_profile_id",
+        "target_service_request_id",
+    ):
+        response = await api.get_relation(
+            "review",
+            params={"select": sensitive_column, "limit": "1"},
+            session=None,
+            check="anonymous_sensitive_review_column_denial",
+            actor="anonymous",
+        )
+        if response.status_code not in base.SAFE_PERMISSION_STATUSES:
+            raise base.AcceptanceFailure(
+                check="anonymous_sensitive_review_column_denial",
+                actor="anonymous",
+                classification="private_column_exposed",
+                http_status=response.status_code,
+            )
+
     rows = await base._read_rows(
         api,
-        relation="public_review",
-        fields=PUBLIC_REVIEW_FIELDS,
+        relation="review",
+        fields=SAFE_REVIEW_FIELDS,
         params={"limit": str(MAX_ACCEPTANCE_ROWS)},
         session=None,
-        check="public_review_projection",
+        check="anonymous_safe_review_read",
         actor="anonymous",
     )
     product_ids: set[str] = set()
     party_ids: set[str] = set()
     for row in rows:
-        if set(row) != set(PUBLIC_REVIEW_FIELDS):
+        if set(row) != set(SAFE_REVIEW_FIELDS):
             raise base.AcceptanceFailure(
-                check="public_review_projection",
+                check="anonymous_safe_review_read",
                 actor="anonymous",
                 classification="malformed_response",
             )
@@ -119,7 +148,7 @@ async def verify_anonymous_review_boundary(
         if row.get("target_service_request_id") is not None:
             # This field is not selected and its appearance is always a leak.
             raise base.AcceptanceFailure(
-                check="public_review_projection",
+                check="anonymous_safe_review_read",
                 actor="anonymous",
                 classification="private_column_exposed",
             )
@@ -129,14 +158,14 @@ async def verify_anonymous_review_boundary(
                 or row.get("target_product_id") is None
             ):
                 raise base.AcceptanceFailure(
-                    check="public_review_projection",
+                    check="anonymous_safe_review_read",
                     actor="anonymous",
-                    classification="invalid_public_review_target",
+                    classification="invalid_anonymous_review_target",
                 )
             product_ids |= _uuid_set(
                 [row],
                 field="target_product_id",
-                check="public_review_projection",
+                check="anonymous_safe_review_read",
                 actor="anonymous",
             )
         elif target_kind == "marketplace_party":
@@ -145,26 +174,26 @@ async def verify_anonymous_review_boundary(
                 or row.get("target_marketplace_party_id") is None
             ):
                 raise base.AcceptanceFailure(
-                    check="public_review_projection",
+                    check="anonymous_safe_review_read",
                     actor="anonymous",
-                    classification="invalid_public_review_target",
+                    classification="invalid_anonymous_review_target",
                 )
             party_ids |= _uuid_set(
                 [row],
                 field="target_marketplace_party_id",
-                check="public_review_projection",
+                check="anonymous_safe_review_read",
                 actor="anonymous",
             )
         else:
             raise base.AcceptanceFailure(
-                check="public_review_projection",
+                check="anonymous_safe_review_read",
                 actor="anonymous",
                 classification="service_review_exposed",
             )
 
     if not product_ids or not party_ids:
         raise base.AcceptanceFailure(
-            check="public_review_projection",
+            check="anonymous_safe_review_read",
             actor="anonymous",
             classification="fixture_precondition_not_met",
         )
@@ -224,8 +253,8 @@ async def verify_anonymous_review_boundary(
 
     service_rows = await base._read_rows(
         api,
-        relation="public_review",
-        fields=PUBLIC_REVIEW_FIELDS,
+        relation="review",
+        fields=SAFE_REVIEW_FIELDS,
         params={"target_kind": "eq.service_request", "limit": "1"},
         session=None,
         check="public_service_review_denial",
@@ -238,7 +267,7 @@ async def verify_anonymous_review_boundary(
             classification="service_review_exposed",
         )
     base.report_result(
-        check="public_review_projection",
+        check="anonymous_safe_review_read",
         actor="anonymous",
         status="passed",
     )
@@ -428,7 +457,7 @@ async def verify_seller_own_capability(
         fields=("marketplace_party_id", "service_type_id"),
         params={
             "marketplace_party_id": f"eq.{seller_party_id.get_secret_value()}",
-            "limit": "1",
+            "limit": str(MAX_ACCEPTANCE_ROWS),
         },
         session=seller_session,
         check="seller_own_capability_read",
@@ -438,6 +467,35 @@ async def verify_seller_own_capability(
         row.get("marketplace_party_id") != seller_party_id.get_secret_value()
         for row in rows
     ):
+        raise base.AcceptanceFailure(
+            check="seller_own_capability_read",
+            actor="seller",
+            classification="fixture_precondition_not_met",
+        )
+    seller_only_found = False
+    for row in rows:
+        service_type_id = base._secret_identifier(
+            row.get("service_type_id"),
+            check="seller_own_capability_read",
+            actor="seller",
+        )
+        anonymous_rows = await base._read_rows(
+            api,
+            relation="party_capability",
+            fields=("marketplace_party_id", "service_type_id"),
+            params={
+                "marketplace_party_id": f"eq.{seller_party_id.get_secret_value()}",
+                "service_type_id": f"eq.{service_type_id.get_secret_value()}",
+                "limit": "1",
+            },
+            session=None,
+            check="seller_own_capability_read",
+            actor="anonymous",
+        )
+        if not anonymous_rows:
+            seller_only_found = True
+            break
+    if not seller_only_found:
         raise base.AcceptanceFailure(
             check="seller_own_capability_read",
             actor="seller",
@@ -488,16 +546,20 @@ async def discover_furnishing_fixtures(
                 check="furnishing_fixture_discovery",
                 actor="customer",
             )
-    editable = by_state.get("draft") or by_state.get("open")
+    editable = tuple(by_state.get(state) for state in ("draft", "open"))
     locked = tuple(by_state.get(state) for state in LOCKED_FURNISHING_STATES)
-    if editable is None or any(snapshot is None for snapshot in locked):
+    if any(snapshot is None for snapshot in editable) or any(
+        snapshot is None for snapshot in locked
+    ):
         raise base.AcceptanceFailure(
             check="furnishing_fixture_discovery",
             actor="customer",
             classification="fixture_precondition_not_met",
         )
     return Phase32CFixtures(
-        editable_request=editable,
+        editable_requests=tuple(
+            snapshot for snapshot in editable if snapshot is not None
+        ),
         locked_requests=tuple(snapshot for snapshot in locked if snapshot is not None),
     )
 
@@ -508,16 +570,7 @@ async def verify_furnishing_update_boundaries(
     customer_session: base.PasswordSession,
     fixtures: Phase32CFixtures,
 ) -> None:
-    await base.probe_noop_patch(
-        api,
-        session=customer_session,
-        actor="customer",
-        expected=fixtures.editable_request,
-        column="lifecycle_state",
-        allowed=True,
-        check="customer_editable_furnishing_noop",
-    )
-    for snapshot in fixtures.locked_requests:
+    for snapshot in fixtures.editable_requests:
         await base.probe_noop_patch(
             api,
             session=customer_session,
@@ -525,8 +578,32 @@ async def verify_furnishing_update_boundaries(
             expected=snapshot,
             column="lifecycle_state",
             allowed=False,
+            check="customer_direct_lifecycle_denial",
+        )
+        await base.probe_noop_patch(
+            api,
+            session=customer_session,
+            actor="customer",
+            expected=snapshot,
+            column=FURNISHING_EDITABLE_PROBE_COLUMN,
+            allowed=True,
+            check="customer_editable_furnishing_noop",
+        )
+    for snapshot in fixtures.locked_requests:
+        await base.probe_noop_patch(
+            api,
+            session=customer_session,
+            actor="customer",
+            expected=snapshot,
+            column=FURNISHING_EDITABLE_PROBE_COLUMN,
+            allowed=False,
             check="customer_locked_furnishing_denial",
         )
+    base.report_result(
+        check="furnishing_update_boundaries",
+        actor="customer",
+        status="passed",
+    )
 
 
 async def run_acceptance_checks(

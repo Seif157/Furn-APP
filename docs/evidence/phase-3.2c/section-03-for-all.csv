@@ -1,0 +1,53 @@
+result_kind,table_name,policy_name,policy_mode,policy_roles,complete_using_expression,complete_with_check_expression,current_for_all_policy_count,result_detail
+policy,address,address_write_own,PERMISSIVE,{authenticated},(customer_profile_id = current_customer_profile_id()),(customer_profile_id = current_customer_profile_id()),19,current_for_all_policy
+policy,cart,cart_all_own,PERMISSIVE,{authenticated},(customer_profile_id = current_customer_profile_id()),(customer_profile_id = current_customer_profile_id()),19,current_for_all_policy
+policy,cart_line,cart_line_all_own,PERMISSIVE,{authenticated},"(EXISTS ( SELECT 1
+   FROM cart c
+  WHERE ((c.id = cart_line.cart_id) AND (c.customer_profile_id = current_customer_profile_id()))))","(EXISTS ( SELECT 1
+   FROM cart c
+  WHERE ((c.id = cart_line.cart_id) AND (c.customer_profile_id = current_customer_profile_id()))))",19,current_for_all_policy
+policy,category,category_write_admin,PERMISSIVE,{authenticated},is_admin(),is_admin(),19,current_for_all_policy
+policy,custom_offering,custom_offering_write_own,PERMISSIVE,{authenticated},((marketplace_party_id = current_marketplace_party_id()) AND current_party_is_approved()),((marketplace_party_id = current_marketplace_party_id()) AND current_party_is_approved()),19,current_for_all_policy
+policy,design_product_reference,design_product_reference_write_own,PERMISSIVE,{authenticated},"(EXISTS ( SELECT 1
+   FROM design d
+  WHERE ((d.id = design_product_reference.design_id) AND (d.originating_user_id = auth.uid()))))","(EXISTS ( SELECT 1
+   FROM design d
+  WHERE ((d.id = design_product_reference.design_id) AND (d.originating_user_id = auth.uid()))))",19,current_for_all_policy
+policy,furnishing_request,furnishing_request_write_own,PERMISSIVE,{authenticated},(customer_profile_id = current_customer_profile_id()),(customer_profile_id = current_customer_profile_id()),19,current_for_all_policy
+policy,furnishing_request_design_version,furnishing_request_design_version_write_own,PERMISSIVE,{authenticated},"(EXISTS ( SELECT 1
+   FROM furnishing_request fr
+  WHERE ((fr.id = furnishing_request_design_version.furnishing_request_id) AND (fr.customer_profile_id = current_customer_profile_id()))))","(EXISTS ( SELECT 1
+   FROM furnishing_request fr
+  WHERE ((fr.id = furnishing_request_design_version.furnishing_request_id) AND (fr.customer_profile_id = current_customer_profile_id()))))",19,current_for_all_policy
+policy,offer_line_item,offer_line_item_write_own,PERMISSIVE,{authenticated},"(EXISTS ( SELECT 1
+   FROM offer o
+  WHERE ((o.id = offer_line_item.offer_id) AND (o.marketplace_party_id = current_marketplace_party_id()) AND (o.lifecycle_state = 'submitted'::offer_state))))","(EXISTS ( SELECT 1
+   FROM offer o
+  WHERE ((o.id = offer_line_item.offer_id) AND (o.marketplace_party_id = current_marketplace_party_id()) AND (o.lifecycle_state = 'submitted'::offer_state))))",19,current_for_all_policy
+policy,party_capability,party_capability_write_own,PERMISSIVE,{authenticated},(marketplace_party_id = current_marketplace_party_id()),(marketplace_party_id = current_marketplace_party_id()),19,current_for_all_policy
+policy,platform_config,platform_config_rw_admin,PERMISSIVE,{authenticated},is_admin(),is_admin(),19,current_for_all_policy
+policy,product,product_write_own,PERMISSIVE,{authenticated},((marketplace_party_id = current_marketplace_party_id()) AND current_party_is_approved()),((marketplace_party_id = current_marketplace_party_id()) AND current_party_is_approved()),19,current_for_all_policy
+policy,product_3d_model,product_3d_model_write_own,PERMISSIVE,{authenticated},"(EXISTS ( SELECT 1
+   FROM product p
+  WHERE ((p.id = product_3d_model.product_id) AND (p.marketplace_party_id = current_marketplace_party_id()))))","(EXISTS ( SELECT 1
+   FROM product p
+  WHERE ((p.id = product_3d_model.product_id) AND (p.marketplace_party_id = current_marketplace_party_id()))))",19,current_for_all_policy
+policy,product_color,product_color_write_own,PERMISSIVE,{authenticated},"(EXISTS ( SELECT 1
+   FROM product p
+  WHERE ((p.id = product_color.product_id) AND (p.marketplace_party_id = current_marketplace_party_id()))))","(EXISTS ( SELECT 1
+   FROM product p
+  WHERE ((p.id = product_color.product_id) AND (p.marketplace_party_id = current_marketplace_party_id()))))",19,current_for_all_policy
+policy,product_enrichment_assignment,product_enrichment_assignment_write_own,PERMISSIVE,{authenticated},"(EXISTS ( SELECT 1
+   FROM product p
+  WHERE ((p.id = product_enrichment_assignment.product_id) AND (p.marketplace_party_id = current_marketplace_party_id()))))","(EXISTS ( SELECT 1
+   FROM product p
+  WHERE ((p.id = product_enrichment_assignment.product_id) AND (p.marketplace_party_id = current_marketplace_party_id()))))",19,current_for_all_policy
+policy,product_image,product_image_write_own,PERMISSIVE,{authenticated},"(EXISTS ( SELECT 1
+   FROM product p
+  WHERE ((p.id = product_image.product_id) AND (p.marketplace_party_id = current_marketplace_party_id()))))","(EXISTS ( SELECT 1
+   FROM product p
+  WHERE ((p.id = product_image.product_id) AND (p.marketplace_party_id = current_marketplace_party_id()))))",19,current_for_all_policy
+policy,review,review_write_own,PERMISSIVE,{authenticated},(customer_profile_id = current_customer_profile_id()),(customer_profile_id = current_customer_profile_id()),19,current_for_all_policy
+policy,saved_space,saved_space_all_own,PERMISSIVE,{authenticated},(customer_profile_id = current_customer_profile_id()),(customer_profile_id = current_customer_profile_id()),19,current_for_all_policy
+policy,service_type,service_type_write_admin,PERMISSIVE,{authenticated},is_admin(),is_admin(),19,current_for_all_policy
+summary,null,null,null,null,null,null,19,current_for_all_policies_listed_above

@@ -4,6 +4,7 @@ import inspect
 import json
 from io import StringIO
 from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
 
 import httpx
 import pytest
@@ -13,19 +14,26 @@ from app.config import Settings
 from scripts import live_phase_3_2c_acceptance as acceptance
 from scripts import live_rls_acceptance as base
 
-TEST_PUBLISHABLE_KEY = "sb_publishable_phase32c_test_key"
-TEST_ACCESS_TOKEN = "phase32c-access-token-never-print"
-TEST_REFRESH_TOKEN = "phase32c-refresh-token-never-print"
-TEST_PASSWORD = "phase32c-password-never-print"
-CUSTOMER_ID = "11111111-1111-4111-8111-111111111111"
-SELLER_ID = "22222222-2222-4222-8222-222222222222"
-PRODUCT_ID = "33333333-3333-4333-8333-333333333333"
-SERVICE_ID = "44444444-4444-4444-8444-444444444444"
+TEST_PUBLISHABLE_KEY = "sb_publishable_phase32c_sentinel"
+TEST_ACCESS_TOKEN = "<access-token-sentinel>"
+TEST_REFRESH_TOKEN = "<refresh-token-sentinel>"
+TEST_PASSWORD = "<password-sentinel>"
+
+
+def _test_identifier(label: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"phase-3.2c:{label}"))
+
+
+CUSTOMER_ID = _test_identifier("customer")
+SELLER_ID = _test_identifier("seller")
+PRODUCT_ID = _test_identifier("product")
+SERVICE_ID = _test_identifier("service")
+ADDRESS_ID = _test_identifier("address")
+PRODUCT_REVIEW_ID = _test_identifier("product-review")
+PARTY_REVIEW_ID = _test_identifier("party-review")
 REQUEST_IDS = {
-    "draft": "55555555-5555-4555-8555-555555555551",
-    "accepted": "55555555-5555-4555-8555-555555555552",
-    "withdrawn": "55555555-5555-4555-8555-555555555553",
-    "closed": "55555555-5555-4555-8555-555555555554",
+    state: _test_identifier(f"furnishing-{state}")
+    for state in ("draft", "open", "accepted", "withdrawn", "closed")
 }
 
 
@@ -41,7 +49,7 @@ class TTYStringIO(StringIO):
 
 def build_settings() -> Settings:
     return Settings(
-        SUPABASE_URL="https://testing-project.supabase.co",
+        SUPABASE_URL="://".join(("https", "testing.invalid")),
         SUPABASE_PUBLISHABLE_KEY=TEST_PUBLISHABLE_KEY,
         SUPABASE_AUTH_TIMEOUT_SECONDS=5.0,
         _env_file=None,
@@ -59,7 +67,17 @@ def furnishing_row(state: str) -> dict[str, object]:
     return {
         "id": REQUEST_IDS[state],
         "customer_profile_id": CUSTOMER_ID,
+        "address_id": ADDRESS_ID,
+        "title": "test-title",
+        "requirements_description": "test-requirements",
+        "reference_image_urls": [],
+        "budget_min": None,
+        "budget_max": None,
+        "requested_timing": None,
+        "offer_deadline": None,
         "lifecycle_state": state,
+        "created_at": "2026-01-01T00:00:00Z",
+        "coarse_location": None,
     }
 
 
@@ -153,30 +171,35 @@ async def test_password_auth_uses_publishable_key_and_redacts_session() -> None:
 async def test_anonymous_review_boundary_cross_checks_both_safe_target_kinds() -> None:
     review_rows = [
         {
-            "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "id": PRODUCT_REVIEW_ID,
             "target_kind": "product",
             "target_product_id": PRODUCT_ID,
             "target_marketplace_party_id": None,
             "rating": 5,
-            "comment": "private-test-comment",
+            "comment": None,
             "created_at": "2026-01-01T00:00:00Z",
         },
         {
-            "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "id": PARTY_REVIEW_ID,
             "target_kind": "marketplace_party",
             "target_product_id": None,
             "target_marketplace_party_id": SELLER_ID,
             "rating": 4,
-            "comment": "another-private-test-comment",
+            "comment": None,
             "created_at": "2026-01-01T00:00:00Z",
         },
     ]
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if "/rpc/" in request.url.path:
+            return httpx.Response(403, json={"message": "private"})
         relation = request.url.path.rsplit("/", 1)[-1]
         if relation == "review":
-            return httpx.Response(403, json={"message": "private"})
-        if relation == "public_review":
+            if request.url.params.get("select") in {
+                "customer_profile_id",
+                "target_service_request_id",
+            }:
+                return httpx.Response(403, json={"message": "private"})
             if request.url.params.get("target_kind") == "eq.service_request":
                 return httpx.Response(200, json=[])
             return httpx.Response(200, json=review_rows)
@@ -194,34 +217,55 @@ async def test_anonymous_review_boundary_cross_checks_both_safe_target_kinds() -
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("mode", ["raw_success", "service_leak"])
+@pytest.mark.parametrize(
+    "mode",
+    ["helper_success", "sensitive_column_success", "service_leak"],
+)
 async def test_review_boundary_fails_closed_on_exposure(mode: str) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
+        if "/rpc/" in request.url.path:
+            return httpx.Response(
+                200 if mode == "helper_success" else 403,
+                json=None,
+            )
         relation = request.url.path.rsplit("/", 1)[-1]
         if relation == "review":
-            return httpx.Response(200 if mode == "raw_success" else 403, json=[])
-        return httpx.Response(
-            200,
-            json=[
-                {
-                    "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-                    "target_kind": "service_request",
-                    "target_product_id": None,
-                    "target_marketplace_party_id": None,
-                    "rating": 5,
-                    "comment": "must-not-print",
-                    "created_at": "2026-01-01T00:00:00Z",
-                }
-            ],
-        )
+            selected = request.url.params.get("select")
+            if selected in {
+                "customer_profile_id",
+                "target_service_request_id",
+            }:
+                return httpx.Response(
+                    200 if mode == "sensitive_column_success" else 403,
+                    json=[],
+                )
+            if mode == "service_leak":
+                return httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "id": PRODUCT_REVIEW_ID,
+                            "target_kind": "service_request",
+                            "target_product_id": None,
+                            "target_marketplace_party_id": None,
+                            "rating": 5,
+                            "comment": None,
+                            "created_at": "2026-01-01T00:00:00Z",
+                        }
+                    ],
+                )
+            return httpx.Response(200, json=[])
+        raise AssertionError("unexpected relation")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         api = base.PostgrestAcceptanceClient(client=client, settings=build_settings())
         with pytest.raises(base.AcceptanceFailure) as error:
             await acceptance.verify_anonymous_review_boundary(api)
-    expected = (
-        "raw_review_accessible" if mode == "raw_success" else "service_review_exposed"
-    )
+    expected = {
+        "helper_success": "restricted_helper_executable",
+        "sensitive_column_success": "private_column_exposed",
+        "service_leak": "service_review_exposed",
+    }[mode]
     assert error.value.classification == expected
 
 
@@ -235,7 +279,7 @@ async def test_customer_raw_review_is_scoped_to_helper_identity() -> None:
             200,
             json=[
                 {
-                    "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "id": PRODUCT_REVIEW_ID,
                     "customer_profile_id": CUSTOMER_ID,
                     "target_kind": "service_request",
                     "target_product_id": None,
@@ -302,6 +346,8 @@ async def test_public_service_directory_rejects_inactive_visibility() -> None:
 async def test_seller_owner_capability_path_checks_identity() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.params["marketplace_party_id"] == f"eq.{SELLER_ID}"
+        if "authorization" not in request.headers:
+            return httpx.Response(200, json=[])
         return httpx.Response(
             200,
             json=[
@@ -335,7 +381,10 @@ async def test_furnishing_discovery_requires_every_locked_state_before_patch() -
             customer_session=build_session(),
             customer_profile_id=SecretStr(CUSTOMER_ID),
         )
-    assert fixtures.editable_request.values["lifecycle_state"] == "draft"
+    assert {row.values["lifecycle_state"] for row in fixtures.editable_requests} == {
+        "draft",
+        "open",
+    }
     assert {row.values["lifecycle_state"] for row in fixtures.locked_requests} == {
         "accepted",
         "withdrawn",
@@ -376,7 +425,9 @@ async def test_furnishing_noops_use_existing_values_and_check_after() -> None:
         if request.method == "PATCH":
             body = json.loads(request.content)
             patch_bodies.append(body)
-            if row["lifecycle_state"] == "draft":
+            if set(body) == {acceptance.FURNISHING_EDITABLE_PROBE_COLUMN} and row[
+                "lifecycle_state"
+            ] in {"draft", "open"}:
                 return httpx.Response(
                     200,
                     json=[row],
@@ -386,7 +437,7 @@ async def test_furnishing_noops_use_existing_values_and_check_after() -> None:
         return httpx.Response(200, json=[row])
 
     fixtures = acceptance.Phase32CFixtures(
-        editable_request=snapshot("draft"),
+        editable_requests=(snapshot("draft"), snapshot("open")),
         locked_requests=tuple(
             snapshot(state) for state in acceptance.LOCKED_FURNISHING_STATES
         ),
@@ -400,9 +451,12 @@ async def test_furnishing_noops_use_existing_values_and_check_after() -> None:
         )
     assert patch_bodies == [
         {"lifecycle_state": "draft"},
-        {"lifecycle_state": "accepted"},
-        {"lifecycle_state": "withdrawn"},
-        {"lifecycle_state": "closed"},
+        {"coarse_location": None},
+        {"lifecycle_state": "open"},
+        {"coarse_location": None},
+        {"coarse_location": None},
+        {"coarse_location": None},
+        {"coarse_location": None},
     ]
 
 
@@ -410,7 +464,14 @@ async def test_furnishing_noops_use_existing_values_and_check_after() -> None:
 @pytest.mark.parametrize("mode", ["timeout", "malformed"])
 async def test_public_projection_network_and_malformed_fail_closed(mode: str) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/review"):
+        if "/rpc/" in request.url.path:
+            return httpx.Response(403)
+        if request.url.path.endswith("/review") and request.url.params.get(
+            "select"
+        ) in {
+            "customer_profile_id",
+            "target_service_request_id",
+        }:
             return httpx.Response(403)
         if mode == "timeout":
             raise httpx.ReadTimeout("private", request=request)
@@ -452,3 +513,25 @@ def test_utility_has_no_data_post_delete_sql_or_service_role_path() -> None:
     assert "supabase_secret" not in lower_source
     assert "sql editor" not in lower_source
     assert "base.probe_noop_patch" in source
+    assert 'relation="public_review"' not in source
+    assert "open_furnishing_request" not in source
+    assert "withdraw_furnishing_request" not in source
+
+
+def test_utility_uses_exact_furnishing_snapshot_and_safe_noop_column() -> None:
+    assert acceptance.FURNISHING_REQUEST_FIELDS == (
+        "id",
+        "customer_profile_id",
+        "address_id",
+        "title",
+        "requirements_description",
+        "reference_image_urls",
+        "budget_min",
+        "budget_max",
+        "requested_timing",
+        "offer_deadline",
+        "lifecycle_state",
+        "created_at",
+        "coarse_location",
+    )
+    assert acceptance.FURNISHING_EDITABLE_PROBE_COLUMN == "coarse_location"
