@@ -96,7 +96,17 @@ The postflight verifies the exact policy inventory on the touched tables and tha
 4. Only then run the standalone preflight; it always rolls back.
 5. If it passes, obtain another human approval before applying the core migration to a fake-data testing branch.
 6. Run each numbered SELECT in the verification file separately.
-7. No live acceptance utility is included in this package. One should be written in the Phase 3.2C shape before production use, covering no-op PATCH probes on each touched table and metadata-only checks of the six functions.
+7. Run the interactive acceptance utility `scripts/live_phase_3_2d_acceptance.py` only after all verification sections pass.
+
+## Live acceptance contract
+
+The utility reuses Phase 3.2B's exact TTY confirmation, password collection, publishable-key authentication, memory-only sessions, safe output labels, and elevated-secret rejection. It issues GET and value-preserving PATCH requests only; it never inserts, deletes, changes a lifecycle state, or names the six transition functions, which the verification file covers.
+
+It reads every fixture before the first PATCH and fails with `fixture_precondition_not_met` if any is missing: for the customer an address, cart, cart line, saved space, own review, a `pending` service request with no party, a non-pending service request, an own order, a design product reference on an own design, and a design version on an own furnishing request; for the seller an own custom offering, an own order, a line on a `submitted` offer, a line on a non-submitted offer, and a capability.
+
+It then probes, reading the complete row snapshot before and after each PATCH and requiring equality: allowed no-op edits on `address.label`, `cart_line.quantity`, `saved_space.space_name`, pending `service_request.details`, `custom_offering.title`, submitted `offer_line_item.quantity`, and seller `purchase_order.notes`; denials on owner columns, `cart`, review columns, `service_request.lifecycle_state` and `marketplace_party_id`, locked requests, customer order notes, seller order `lifecycle_state`, non-submitted lines, and the three link tables through a composite-key denial probe. It also proves the marketplace_party column boundary for anonymous and signed-in readers and reruns the financial-view scope check for both actors.
+
+No output includes passwords, tokens, UUIDs, row bodies, or configured endpoint values.
 
 ## Section 03 disposition ledger — the 10 deferred policies
 

@@ -892,7 +892,9 @@ def test_document_records_design_allowlists_transitions_and_review_gate() -> Non
     assert "pending → confirmed → preparing → out_for_delivery → delivered" in doc
     assert "accepted → in_progress" in doc
     assert "No client role can read `user_id`" in doc
-    assert "No live acceptance utility is included" in doc
+    assert "## Live acceptance contract" in doc
+    assert "scripts/live_phase_3_2d_acceptance.py" in doc
+    assert "never inserts, deletes, changes a lifecycle state" in doc
     assert "- `deferred_with_named_blocker`: 0" in doc
     assert "104-column" in doc
     assert "312-row" in doc

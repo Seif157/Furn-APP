@@ -137,7 +137,9 @@ def test_scoping_document_is_planning_only() -> None:
         PROJECT_ROOT / "sql" / "phase-3.2d-security-hardening-preflight.sql",
         PROJECT_ROOT / "sql" / "phase-3.2d-security-hardening-verify.sql",
     }
-    assert not list((PROJECT_ROOT / "scripts").glob("*3_2d*"))
+    assert [path.name for path in (PROJECT_ROOT / "scripts").glob("*3_2d*")] == [
+        "live_phase_3_2d_acceptance.py"
+    ]
 
 
 def test_column_inventory_diagnostic_is_four_select_only_catalog_statements() -> None:
