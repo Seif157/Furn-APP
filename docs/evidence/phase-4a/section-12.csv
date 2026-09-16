@@ -1,0 +1,2 @@
+check_name,expected_count,actual_count,failed_count,check_passed
+catalogue_tables_present_with_rls,8,8,0,true

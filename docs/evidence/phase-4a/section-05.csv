@@ -1,0 +1,7 @@
+row_kind,material,product_count
+token,خشب زان,2
+token,mdf,1
+token,خشب,1
+token,قطن,1
+token,قماش,1
+summary,products_without_materials,0

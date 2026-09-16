@@ -1,0 +1,10 @@
+row_kind,colour,colour_rows,product_count,in_stock_rows
+token,أبيض — white,2,2,2
+token,بني — brown,1,1,1
+token,بني غامق — dark brown,1,1,1
+token,بيج — beige,1,1,1
+token,رمادي — grey,1,1,1
+token,طبيعي — natural,1,1,1
+token,كحلي — navy,1,1,1
+token,وينجيه — wenge,1,1,1
+summary,published_products_without_stock,0,0,0

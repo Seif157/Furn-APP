@@ -1,0 +1,5 @@
+measure,product_count,null_count,non_positive_count,minimum,median,maximum,over_1000_count
+depth_cm,4,0,0,60.00,92.5,210.00,0
+height_cm,4,0,0,75.00,105,220.00,0
+weight_kg,4,4,0,null,null,null,0
+width_cm,4,0,0,160.00,205,240.00,0
