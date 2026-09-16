@@ -1022,7 +1022,7 @@ AI FOUNDATION
 ├── Phase 4A Catalogue Quality Audit            COMPLETE (read-only run 2026-09-16)
 ├── Phase 4B Product Normalization              IMPLEMENTED LOCALLY (app/catalog/normalization.py)
 ├── Phase 4C Search Schema                      IMPLEMENTED LOCALLY (app/search/models.py)
-└── Phase 4D Deterministic Structured Search
+└── Phase 4D Deterministic Structured Search    IMPLEMENTED LOCALLY (app/search/service.py)
 
 AI SEARCH
 ├── Phase 5A Natural-Language Parser
