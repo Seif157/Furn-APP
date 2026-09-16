@@ -33,6 +33,8 @@ select = ["E", "F", "I", "UP", "B"]
 # SQL templates embedded in the Phase 3.2D generator keep the migration's
 # own line layout; wrapping them would change the generated artifacts.
 "tests/phase_3_2d_package.py" = ["E501"]
+# The seed catalogue is a data table; one product per line keeps it reviewable.
+"tests/seed_catalogue.py" = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -1024,6 +1024,11 @@ AI FOUNDATION
 ├── Phase 4C Search Schema                      IMPLEMENTED LOCALLY (app/search/models.py)
 └── Phase 4D Deterministic Structured Search    IMPLEMENTED LOCALLY (app/search/service.py)
 
+Seed data: tests/seed_catalogue.py defines 44 fake products and renders
+seed/phase-5-fake-catalogue.sql (testing branch only, never production; the
+seed/ folder is the only place application-row DML may live). Offline tests
+and evaluation use the same definition through as_json_fixture().
+
 AI SEARCH
 ├── Phase 5A Natural-Language Parser
 ├── Phase 5B SearchSpecification
