@@ -459,3 +459,22 @@ def test_the_instruction_is_built_from_the_live_vocabularies() -> None:
         for term in vocabulary.terms:
             assert term.english in REQUIREMENT_INSTRUCTION
             assert term.arabic in REQUIREMENT_INSTRUCTION
+
+
+def test_an_unstocked_category_narrows_rather_than_disappearing() -> None:
+    # The failure this guards: the model leaves category empty because the
+    # marketplace has no coffee tables, every constraint vanishes, and the
+    # search returns the whole catalogue as if the question were ignored.
+    # Reported unresolved, the caller can say the category is not stocked.
+    build = specification_from_draft(
+        RequirementDraft(category="coffee table"), query="I need a coffee table"
+    )
+
+    assert build.specification.hard.category is None
+    assert build.unresolved == (
+        search.UnresolvedTerm(field="category", surface="coffee table"),
+    )
+
+
+def test_the_instruction_tells_the_model_not_to_drop_an_unstocked_category() -> None:
+    assert "Never leave category empty" in REQUIREMENT_INSTRUCTION

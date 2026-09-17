@@ -72,6 +72,13 @@ Materials:
 If the customer names something that is not in these lists, write their own
 word. Do not substitute the nearest listed word.
 
+Always fill in category when the customer names a kind of furniture, even when
+it is not in the list above. Write their own words for it, for example "coffee
+table" or "مكتب". Never leave category empty because the marketplace looks like
+it does not stock that thing. Deciding what is stocked is not your job, and an
+empty category makes the search return the entire catalogue instead of saying
+nothing was found.
+
 Styles and room types are free text. Write them in English, lowercase, as the
 customer meant them, for example "modern", "scandinavian", "living room".
 
