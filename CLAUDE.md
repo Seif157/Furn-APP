@@ -69,15 +69,30 @@ Phase 3.2A   Security Audit                        COMPLETE
 Phase 3.2B   Initial Security Hardening            COMPLETE PACKAGE
 Phase 3.2C   Correction + Reconciliation           COMMITTED, PENDING HUMAN REVIEW
 Phase 3.2D   Deferred-Finding Remediation          COMMITTED, PENDING HUMAN REVIEW
+Phase 4A-4D  AI Foundation                         COMMITTED (see section 13)
+Phase 5A     Natural-Language Parser               COMMITTED, LIVE-VERIFIED
+Phase 5C     Search Endpoint POST /v1/search       COMMITTED, LIVE-VERIFIED
 ```
 
-Branches (both pushed to origin, neither merged):
+Branches (all pushed to origin, none merged):
 
 ```text
 main                              b7931a0
 phase-3.2c-security-hardening     fb3e0ca  (PR target: main)
 phase-3.2d-security-hardening     78ae8c3  (stacked on 3.2C; PR target: the 3.2C branch)
+phase-4a-catalogue-audit          60d435e  (stacked on 3.2D; holds Phase 4 and 5)
 ```
+
+The branch name predates its contents: `phase-4a-catalogue-audit` carries all
+of Phase 4 and Phase 5. It is stacked on the two security branches, so nothing
+in Phase 4 or 5 can reach `main` until those are reviewed and applied. Phase 4
+and 5 do not depend on the security migrations, so rebasing them onto `main` is
+clean whenever shipping matters more than branch history.
+
+Live catalogue state (2026-09-17): the Phase 5 seed is loaded on the project
+`.env` points at, giving 45 recommendation-eligible products, 41 seeded and 4
+real. That project is not a separate testing branch. Remove the seed with
+`seed/phase-5-fake-catalogue-remove.sql` before real customers see it.
 
 Phase 3.2D resolves the 56 items 3.2C deferred plus two observed state-write
 findings. Its three SQL files are generated from `docs/evidence/phase-3.2d/`
@@ -87,18 +102,20 @@ SQL. Decisions are recorded in `docs/phase-3.2d-decisions.md`; design in
 `scripts/live_phase_3_2d_acceptance.py` (GET and no-op PATCH only; never run
 it without explicit authorization).
 
-Latest verification (2026-09-15, on the 3.2D branch):
+Latest verification (2026-09-17, on the phase-4a-catalogue-audit branch):
 
 ```text
-pytest:                  280 passed
+pytest:                  533 passed
 ruff:                    passed
 format:                  passed
 git diff --check:        clean
-SQL parsing:             15/15
+SQL parsing:             all seed and security files parse
 3.2C FOR ALL reconciliation:  19/19
 3.2C finding reconciliation:  122/122
 3.2D deferred reconciliation: 56/56 (20 remediated, 31 accepted, 7 false positive)
-generator == SQL on disk:     yes
+generator == SQL on disk:     yes (both security and seed generators)
+app startup:             real lifespan boots; /health 200
+Supabase Auth leg:       reachable; a bogus token returns 401 invalid_access_token
 ```
 
 Current status:
@@ -108,7 +125,11 @@ Phase 3.2C migration:    NOT EXECUTED
 Phase 3.2D migration:    NOT EXECUTED (requires 3.2C applied first)
 Live acceptance:         NOT EXECUTED
 Approval:                HUMAN SECURITY REVIEW REQUIRED (both packages)
+Search with a real user session:  NOT YET EXERCISED (needs a signed-in account)
 ```
+
+Starting the API: `uv run python -m scripts.serve`. Not `uv run uvicorn`, which
+Windows Application Control blocks on this machine (os error 4551).
 
 ## 5. Backend Features
 
@@ -355,7 +376,8 @@ room type
 capacity
 ```
 
-Status: **Planned**
+Status: **Implemented (Phase 4D, app/search/service.py). Capacity and room type
+are not catalogue fields, so "seats six" is understood and cannot be matched.**
 
 ### 5.9 Search Specification
 
@@ -386,7 +408,8 @@ SearchSpecification
 SearchResult
 ```
 
-Status: **Planned**
+Status: **Implemented (Phase 4C, app/search/models.py). This is what the
+roadmap calls Phase 5B.**
 
 ### 5.10 Hybrid Retrieval
 
@@ -403,7 +426,9 @@ Candidate products
 
 Structured filters handle objective constraints. Semantic retrieval handles fuzzy concepts such as cozy, minimal, luxury, Scandinavian, warm, hotel-like.
 
-Status: **Planned — Phase 5**
+Status: **Structured half implemented and shipped as POST /v1/search. The
+semantic and vector half is deliberately deferred: section 11 requires
+evaluation to prove it earns its place, and that evaluation is Phase 5D.**
 
 ### 5.11 Recommendation Engine
 
@@ -578,7 +603,8 @@ color = beige
 style = modern
 ```
 
-Status: **Planned**
+Status: **Implemented (Phase 5A). "around 220 cm" is read as a preference and
+"under 30,000" as a limit, verified live in Arabic and English.**
 
 ### 6.3 Clarification
 
@@ -598,7 +624,10 @@ How many people should it seat, and roughly how much space do you have?
 
 A detailed query should search immediately.
 
-Status: **Planned**
+Status: **Partially implemented. The parser returns a `clarification` question
+in the customer's language when a sentence is too vague, and the endpoint
+passes it through. There is no conversational follow-up yet; that is Phase
+7A.**
 
 ### 6.4 Semantic Search
 
@@ -782,7 +811,9 @@ Normalization should support:
 - Arabic furniture vocabulary
 - mixed Arabic/English styles
 
-Status: **Planned**
+Status: **Implemented. Arabic digits, "ألف", and mixed sentences all parse, and
+the response answers in the customer's language with localized vocabulary
+labels. Verified live on 2026-09-17.**
 
 ### 6.12 Personalization
 
@@ -1140,7 +1171,25 @@ Phase 3.2D: write live acceptance utility, then the same review/apply cycle
 Phase 4 AI foundation
 ```
 
-Do not jump directly into live AI work unless the user explicitly changes priorities.
+The user changed priorities on 2026-09-17 and authorized the AI work ahead of
+the security review, for a demo on 2026-09-19. Phases 4A-4D, 5A and 5C are
+built, committed, pushed, and verified against the live Gemini API and the live
+catalogue. The security review is still the blocker for merging to `main` and
+for real customers, and it has not moved.
+
+Handing the search feature to Flutter: docs/flutter-search-contract.md holds
+the request and response shapes dumped from the running app, the error codes,
+and a working Dart client. Two integration rules in it are not optional. Every
+decimal arrives as a JSON string, so a direct cast to double throws. And the
+displayed price must prefer `discount_price`, because search filters on what
+the customer pays.
+
+Running the demo: docs/phase-5-demo-runbook.md.
+
+Next engineering step after the demo is Phase 5D evaluation, which turns parser
+quality into a measured number and decides whether semantic retrieval is worth
+adding. Before real customers: the 3.2C and 3.2D security review, and removing
+the fake seed from the live project.
 
 ## 15. Live-System Safety
 
