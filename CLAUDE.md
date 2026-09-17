@@ -1122,10 +1122,24 @@ language" section of docs/phase-5c-search-endpoint.md records what is still
 English only.
 
 AI RECOMMENDATION
-├── Phase 6A Ranking / Scoring
-├── Phase 6B Compatibility
-├── Phase 6C Explanation
-└── Phase 6D Comparison
+├── Phase 6A Ranking / Scoring               DONE IN PHASE 4D (app/search/ranking.py)
+├── Phase 6B Compatibility                   BLOCKED: needs seat/table heights
+├── Phase 6C Explanation                     IMPLEMENTED LOCALLY, LIVE-VERIFIED
+├── Phase 6D Comparison                      NOT STARTED
+└── Phase 6.10 Nearest alternatives          IMPLEMENTED LOCALLY, LIVE-VERIFIED
+
+Phase 6C and 6.10 are in app/recommendations/ and deterministic: no provider is
+called, so neither can invent a product, a price, or a reason. Reasons are read
+back from the ConstraintCheck values Phase 4D already recorded. Design and the
+live measurements are in docs/phase-6-recommendations.md.
+
+Verifying them surfaced a parser bug that predated them: the prompt listed the
+catalogue vocabulary and asked the model to pick the matching entry, and it
+copied the wrong entry in 1 run of 4, answering Beds to an Arabic sofa query.
+Removing that paragraph made it worse (2 of 4). The fix was to stop asking the
+model to choose a category at all: it copies the customer's own word and the
+Phase 4B vocabulary maps it, which is what the vocabulary is for. Re-measured
+over nine sentences at five runs each, every answer was correct.
 
 AI ASSISTANT
 ├── Phase 7A Clarification

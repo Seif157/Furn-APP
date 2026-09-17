@@ -40,6 +40,7 @@ from app.catalog.gateway import (
 )
 from app.catalog.normalization import normalize_product
 from app.catalog.transform import is_recommendation_eligible
+from app.recommendations.alternatives import nearest_alternatives
 from app.search.dependencies import (
     get_optional_ai_provider,
     invalid_search_query,
@@ -132,15 +133,22 @@ async def search(
         if is_recommendation_eligible(product)
     )
 
+    normalized = tuple(normalize_product(product) for product in candidates)
     try:
-        results = search_products(
-            (normalize_product(product) for product in candidates),
-            parsed.specification,
-        )
+        results = search_products(normalized, parsed.specification)
     except ValueError:
         # Duplicate ids or an oversized candidate set: a catalogue problem, not
         # a client one.
         raise catalogue_upstream_error() from None
+
+    # Only when nothing matched. With results on the page, near misses are
+    # noise; with none, they are the difference between a dead end and a
+    # decision the customer can make.
+    alternatives = (
+        nearest_alternatives(normalized, parsed.specification)
+        if results.match_count == 0
+        else ()
+    )
 
     return build_search_response(
         candidates,
@@ -151,4 +159,5 @@ async def search(
         clarification=parsed.clarification,
         unresolved=parsed.unresolved,
         truncated=truncated,
+        alternatives=alternatives,
     )

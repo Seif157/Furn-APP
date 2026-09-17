@@ -187,21 +187,52 @@ class Vocabulary:
 CATEGORIES = Vocabulary(
     "category",
     (
-        VocabularyTerm("beds", "Beds", "أسرّة", ("bed", "سرير", "اسرة"), True),
+        # Multi-word phrasings are listed explicitly because lookup matches a
+        # whole surface, not its tokens. A customer asking for "كرسي مكتب"
+        # said the right thing; without the entry the category simply does not
+        # resolve and the search widens to everything.
+        VocabularyTerm(
+            "beds",
+            "Beds",
+            "أسرّة",
+            ("bed", "سرير", "اسرة", "سرير نوم", "beds frame", "bed frame"),
+            True,
+        ),
         VocabularyTerm(
             "dining",
             "Dining",
             "سفرة",
-            ("dining table", "طاولة سفرة", "dining set"),
+            (
+                "dining table",
+                "طاولة سفرة",
+                "dining set",
+                "ترابيزة سفرة",
+                "طاولة طعام",
+                "dining room table",
+            ),
             True,
         ),
         VocabularyTerm(
-            "sofas", "Sofas", "كنب", ("sofa", "couch", "كنبة", "أريكة"), True
+            "sofas",
+            "Sofas",
+            "كنب",
+            ("sofa", "couch", "كنبة", "أريكة", "كنبة سرير", "sofa bed", "settee"),
+            True,
         ),
         VocabularyTerm(
-            "wardrobes", "Wardrobes", "دواليب", ("wardrobe", "closet", "دولاب"), True
+            "wardrobes",
+            "Wardrobes",
+            "دواليب",
+            ("wardrobe", "closet", "دولاب", "دولاب ملابس", "خزانة ملابس", "خزانة"),
+            True,
         ),
-        VocabularyTerm("chairs", "Chairs", "كراسي", ("chair", "كرسي"), True),
+        VocabularyTerm(
+            "chairs",
+            "Chairs",
+            "كراسي",
+            ("chair", "كرسي", "كرسي مكتب", "office chair", "desk chair", "كرسي سفرة"),
+            True,
+        ),
     ),
 )
 

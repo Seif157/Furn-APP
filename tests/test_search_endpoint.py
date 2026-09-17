@@ -568,3 +568,86 @@ async def test_product_text_is_never_translated() -> None:
     assert payload["language"] == "en"
     # Seed product names are Arabic; an English response keeps them Arabic.
     assert any("كنبة" in item["product"]["name"] for item in payload["items"])
+
+
+# --- grounded reasons and alternatives (Phase 6) -----------------------------
+
+
+@pytest.mark.anyio
+async def test_each_result_explains_itself_with_catalogue_values() -> None:
+    provider = StubProvider(SOFA_DRAFT)
+
+    async with search_client(seed_response, provider) as client:
+        response = await post_search(client, {"query": "modern beige sofa"})
+
+    item = response.json()["items"][0]
+    reasons = {reason["code"]: reason["text"] for reason in item["reasons"]}
+    # The number in each sentence is the product's own, next to the stated
+    # limit. Nothing here came from the model.
+    assert reasons["price"].endswith("within your 15,000 EGP budget")
+    assert "within your 220 cm limit" in reasons["width"]
+    assert reasons["in_stock"] == "in stock"
+    assert item["product"]["price"].split(".")[0] in reasons["price"].replace(",", "")
+
+
+@pytest.mark.anyio
+async def test_reasons_follow_the_customers_language() -> None:
+    provider = StubProvider({"category": "كنب", "max_price": 15000})
+
+    async with search_client(seed_response, provider) as client:
+        response = await post_search(client, {"query": "عايز كنبة رخيصة"})
+
+    reasons = {r["code"]: r["text"] for r in response.json()["items"][0]["reasons"]}
+    assert reasons["in_stock"] == "متوفر"
+    assert "جنيه" in reasons["price"]
+
+
+@pytest.mark.anyio
+async def test_a_search_with_no_matches_offers_the_nearest_real_products() -> None:
+    # No sofa is this cheap, so an empty result would be a dead end.
+    provider = StubProvider({"category": "sofa", "max_price": 5000})
+
+    async with search_client(seed_response, provider) as client:
+        response = await post_search(client, {"query": "a sofa under 5000"})
+
+    payload = response.json()
+    assert payload["match_count"] == 0
+    assert payload["items"] == []
+    assert payload["alternatives"]
+    for alternative in payload["alternatives"]:
+        # A real catalogue row, rendered by the same transform as a result.
+        assert alternative["product"]["id"].startswith("7a000000")
+        assert alternative["missed_count"] >= 1
+        assert alternative["missed"]
+        assert any(
+            "over your budget" in reason["text"] for reason in alternative["missed"]
+        )
+
+
+@pytest.mark.anyio
+async def test_alternatives_are_offered_only_when_nothing_matched() -> None:
+    provider = StubProvider(SOFA_DRAFT)
+
+    async with search_client(seed_response, provider) as client:
+        response = await post_search(client, {"query": "modern beige sofa"})
+
+    payload = response.json()
+    assert payload["match_count"] > 0
+    assert payload["alternatives"] == []
+
+
+@pytest.mark.anyio
+async def test_an_arabic_no_match_explains_the_shortfall_in_arabic() -> None:
+    provider = StubProvider({"category": "كنب", "max_price": 5000})
+
+    async with search_client(seed_response, provider) as client:
+        response = await post_search(client, {"query": "عايز كنبة بـ ٥ آلاف"})
+
+    payload = response.json()
+    assert payload["alternatives"]
+    texts = [
+        reason["text"]
+        for alternative in payload["alternatives"]
+        for reason in alternative["missed"]
+    ]
+    assert any("ميزانيتك" in text for text in texts)

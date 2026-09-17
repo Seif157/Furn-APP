@@ -476,5 +476,34 @@ def test_an_unstocked_category_narrows_rather_than_disappearing() -> None:
     )
 
 
-def test_the_instruction_tells_the_model_not_to_drop_an_unstocked_category() -> None:
-    assert "Never leave category empty" in REQUIREMENT_INSTRUCTION
+def test_the_instruction_asks_for_the_customers_own_word_not_a_list_entry() -> None:
+    # Measured on 2026-09-17: telling the model to pick the nearest listed
+    # category made it answer "Beds" to a sofa question in 2 runs of 4. Asking
+    # for the customer's own word instead scored 40 of 45 across nine
+    # sentences, and the vocabulary does the mapping, which is its job.
+    assert "Copy their word, not the closest entry" in REQUIREMENT_INSTRUCTION
+    assert "a wrong category is worse than an empty one" in REQUIREMENT_INSTRUCTION
+
+
+@pytest.mark.parametrize(
+    ("surface", "expected"),
+    [
+        ("كرسي مكتب", "chairs"),
+        ("office chair", "chairs"),
+        ("كنبة سرير", "sofas"),
+        ("sofa bed", "sofas"),
+        ("دولاب ملابس", "wardrobes"),
+        ("طاولة طعام", "dining"),
+        ("سرير نوم", "beds"),
+    ],
+)
+def test_multi_word_category_phrasings_resolve(surface: str, expected: str) -> None:
+    # Lookup matches a whole surface, not its tokens, so a customer saying
+    # "كرسي مكتب" used to resolve to nothing and widen the search to the whole
+    # catalogue. Observed live on 2026-09-17.
+    build = specification_from_draft(
+        RequirementDraft(category=surface), query=f"عايز {surface}"
+    )
+
+    assert build.specification.hard.category == expected
+    assert build.unresolved == ()

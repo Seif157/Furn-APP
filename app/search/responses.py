@@ -22,6 +22,9 @@ from app.catalog.models import ProductResponse, StrictResponseModel
 from app.catalog.normalization import CATEGORIES, COLOURS, MATERIALS, Vocabulary
 from app.catalog.transform import build_product_response
 from app.catalog.upstream_models import UpstreamProduct
+from app.recommendations.alternatives import Alternative
+from app.recommendations.explanations import match_reasons, shortfall_reasons
+from app.recommendations.models import AlternativeResponse, ReasonResponse
 from app.search.localization import response_language, term_label
 from app.search.models import (
     DimensionRange,
@@ -103,6 +106,8 @@ class SearchItemResponse(StrictResponseModel):
     hard constraint, so this never explains exclusion."""
     matched: tuple[str, ...]
     """The hard constraints this product was checked against and satisfied."""
+    reasons: tuple[ReasonResponse, ...]
+    """Why it matches, as catalogue facts. Phase 6C; never model prose."""
 
 
 class SearchResponse(StrictResponseModel):
@@ -122,6 +127,8 @@ class SearchResponse(StrictResponseModel):
     unresolved: tuple[UnresolvedResponse, ...]
     excluded_by: tuple[ExclusionResponse, ...]
     """Why candidates were removed, most exclusions first."""
+    alternatives: tuple[AlternativeResponse, ...]
+    """Nearest real products, offered only when nothing matched. Phase 6.10."""
 
 
 def _price_range(bounds: PriceRange | None) -> RangeResponse | None:
@@ -188,6 +195,7 @@ def build_search_response(
     clarification: str | None,
     unresolved: tuple[UnresolvedTerm, ...],
     truncated: bool,
+    alternatives: tuple[Alternative, ...] = (),
 ) -> SearchResponse:
     """Compose the response, keeping ranking order and dropping what cannot ship.
 
@@ -210,6 +218,27 @@ def build_search_response(
                 product=response,
                 score=scored.score,
                 matched=tuple(check.name for check in scored.checks if check.satisfied),
+                reasons=match_reasons(scored.checks, specification.hard, language),
+            )
+        )
+
+    offered: list[AlternativeResponse] = []
+    for alternative in alternatives:
+        upstream = by_id.get(alternative.product.id)
+        if upstream is None:
+            continue
+        # An alternative goes through the same transform as a result, so a row
+        # the catalogue would withhold cannot reach a client by this route.
+        response = build_product_response(upstream)
+        if response is None:
+            continue
+        offered.append(
+            AlternativeResponse(
+                product=response,
+                missed=shortfall_reasons(
+                    alternative.checks, specification.hard, language
+                ),
+                missed_count=len(alternative.missed),
             )
         )
 
@@ -234,4 +263,5 @@ def build_search_response(
                 results.rejections, key=lambda item: (-item[1], item[0])
             )
         ),
+        alternatives=tuple(offered),
     )
