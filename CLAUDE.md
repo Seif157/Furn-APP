@@ -544,7 +544,9 @@ AI converts it to:
 
 Then the backend searches real catalogue data.
 
-Status: **Planned — First core AI feature**
+Status: **Parser implemented locally (Phase 5A, app/ai/) and verified against
+the live Gemini API on 2026-09-17. No HTTP route yet, so nothing is exposed to
+Flutter.**
 
 ### 6.2 Requirement Extraction
 
@@ -932,6 +934,14 @@ analyze_room(...)
 
 Keep provider-specific logic behind a narrow boundary.
 
+As built in Phase 5A, the protocol is one vendor-neutral method,
+`generate_json(instruction, prompt, schema)`. The capabilities listed above are
+backend functions built on top of it, not methods a vendor implements:
+`parse_requirements` is `app/ai/service.py`. Prompts, response schemas, and
+guardrails therefore sit above the boundary, so a new provider inherits them
+instead of reimplementing them. User text is always passed as `prompt` and
+never spliced into `instruction`.
+
 ## 10. AI Guardrails
 
 Validate AI output before application use.
@@ -946,6 +956,15 @@ invalid dimension → reject
 ```
 
 Typed validation sits between model output and business logic.
+
+Phase 5A implements this as `app/ai/models.py` (the untrusted draft shape) and
+`app/ai/guardrails.py` (bounds, then vocabulary resolution through
+`build_specification`). Two properties matter and are tested: the draft has no
+field capable of carrying a marketplace fact, so an invented product has
+nowhere to travel; and an unrecognised word is reported as unresolved, never
+mapped to a near neighbour. A bad hard constraint rejects the draft, because
+silently widening a stated limit shows the customer products they ruled out; a
+bad soft preference is dropped, because it only orders correct results.
 
 ## 11. Vector Search Plan
 
@@ -1029,8 +1048,27 @@ seed/phase-5-fake-catalogue.sql (testing branch only, never production; the
 seed/ folder is the only place application-row DML may live). Offline tests
 and evaluation use the same definition through as_json_fixture().
 
+AI provider: Google Gemini, chosen 2026-09-17, model gemini-3.6-flash. The
+vendor boundary is app/ai/provider.py; the only vendor code is
+app/ai/providers/gemini.py, which calls the REST API over the existing httpx
+client so no dependency is added. AI settings are a separate optional group
+(app/config.py AISettings), so an instance with no GEMINI_API_KEY still starts
+and refuses only the AI path.
+
+Verified against the live API on 2026-09-17 via scripts/live_gemini_smoke.py:
+Arabic, English, and too-vague sentences all parsed correctly. Two findings are
+baked into the defaults. gemini-2.5-flash is listed but returns 404 on
+generateContent for new keys, so the default is gemini-3.6-flash. Reasoning
+tokens are charged against the output cap, so GEMINI_THINKING_BUDGET defaults
+to 0 and the request adds the budget to the cap; without that the same request
+overran the cap and returned truncated JSON, which the finishReason check
+correctly refused.
+
+The test suite never contacts a provider. Only scripts/live_gemini_smoke.py
+does, and only with --i-have-authorization.
+
 AI SEARCH
-├── Phase 5A Natural-Language Parser
+├── Phase 5A Natural-Language Parser         IMPLEMENTED LOCALLY (app/ai/)
 ├── Phase 5B SearchSpecification
 ├── Phase 5C Hybrid Retrieval
 └── Phase 5D Search Evaluation

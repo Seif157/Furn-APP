@@ -6,6 +6,17 @@ from typing import Annotated
 from pydantic import Field, HttpUrl, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict, SettingsError
 
+# Verified against the live API on 2026-09-17. gemini-2.5-flash answers a model
+# listing but returns 404 on generateContent for keys created after its
+# retirement, and Google's own error names gemini-3.6-flash as the replacement.
+DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
+DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
+# The model name is interpolated into the request path, and the API key into a
+# request header. Both alphabets are deliberately narrow so neither value can
+# introduce a path segment, a query string, or a header separator.
+GEMINI_MODEL_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+GEMINI_API_KEY_PATTERN = re.compile(r"[\x21-\x7e]{8,256}")
+
 
 class Settings(BaseSettings):
     """Strict settings loaded from the process environment or a local `.env`."""
@@ -47,6 +58,87 @@ class Settings(BaseSettings):
         return value
 
 
+class AISettings(BaseSettings):
+    """Optional AI provider settings, loaded independently of Supabase.
+
+    Every field has a default, so an instance with no AI configuration still
+    starts and still serves auth and catalogue. Only the AI path is refused,
+    and ``gemini_enabled`` is the single place that decides.
+    """
+
+    model_config = SettingsConfigDict(
+        case_sensitive=True,
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        frozen=True,
+        strict=True,
+    )
+
+    gemini_api_key: SecretStr | None = Field(
+        default=None, validation_alias="GEMINI_API_KEY"
+    )
+    gemini_model: str = Field(
+        default=DEFAULT_GEMINI_MODEL, validation_alias="GEMINI_MODEL"
+    )
+    gemini_timeout_seconds: Annotated[float, Field(gt=0, le=60)] = Field(
+        default=20.0, validation_alias="GEMINI_TIMEOUT_SECONDS"
+    )
+    gemini_base_url: HttpUrl = Field(
+        default=HttpUrl(DEFAULT_GEMINI_BASE_URL), validation_alias="GEMINI_BASE_URL"
+    )
+    gemini_thinking_budget: Annotated[int, Field(ge=0, le=24576)] = Field(
+        default=0, validation_alias="GEMINI_THINKING_BUDGET"
+    )
+    """Reasoning tokens allowed per call.
+
+    Zero for requirement extraction: the task is short and mechanical, and
+    reasoning tokens are charged against the same output cap as the answer.
+    Measured on 2026-09-17, the identical request spent 1908 reasoning tokens
+    with the field absent, overran the cap, and came back truncated; with the
+    budget at zero it spent none and answered correctly.
+
+    Not every model accepts the field. Some reject the whole request with
+    INVALID_ARGUMENT, so a model change may mean removing it rather than
+    tuning it.
+    """
+
+    @property
+    def gemini_enabled(self) -> bool:
+        """Whether a key is present, which is the only switch for the AI path."""
+
+        return self.gemini_api_key is not None
+
+    @field_validator("gemini_api_key")
+    @classmethod
+    def require_header_safe_key(cls, value: SecretStr | None) -> SecretStr | None:
+        """Reject blanks and any byte that could forge an extra request header."""
+
+        if value is None:
+            return None
+        if GEMINI_API_KEY_PATTERN.fullmatch(value.get_secret_value()) is None:
+            raise ValueError("GEMINI_API_KEY is malformed")
+        return value
+
+    @field_validator("gemini_model")
+    @classmethod
+    def require_path_safe_model(cls, value: str) -> str:
+        """Keep the model name a single, literal URL path segment."""
+
+        if GEMINI_MODEL_PATTERN.fullmatch(value) is None:
+            raise ValueError("GEMINI_MODEL is malformed")
+        return value
+
+    @field_validator("gemini_base_url")
+    @classmethod
+    def require_https_base_url(cls, value: HttpUrl) -> HttpUrl:
+        """Allow the API key to be sent only to an HTTPS endpoint."""
+
+        if value.scheme != "https":
+            raise ValueError("GEMINI_BASE_URL must use HTTPS")
+        return value
+
+
 def load_settings() -> Settings:
     """Load settings while keeping configuration values out of startup errors."""
 
@@ -54,3 +146,12 @@ def load_settings() -> Settings:
         return Settings()
     except (SettingsError, ValidationError):
         raise RuntimeError("Application configuration is invalid.") from None
+
+
+def load_ai_settings() -> AISettings:
+    """Load AI settings, keeping provider credentials out of startup errors."""
+
+    try:
+        return AISettings()
+    except (SettingsError, ValidationError):
+        raise RuntimeError("AI provider configuration is invalid.") from None
