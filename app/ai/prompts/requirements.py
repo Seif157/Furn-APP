@@ -46,6 +46,19 @@ Separate what the customer requires from what the customer merely prefers.
 "under", "no more than", "maximum", "أقل من", "في حدود ميزانية" describe a
 limit.
 
+Colour and material are not treated the same way, because customers do not
+treat them the same way.
+
+  A colour the customer simply describes is a preference. "كنبة بيج" and "a
+  white wardrobe" both go in preferred_colours. Only an explicit demand makes
+  a colour required: "لازم أبيض", "must be white", "white only". Colour is the
+  attribute people substitute most, and filtering it away hides products they
+  would have bought.
+
+  A material the customer names is a requirement. "خشب زان" and "beech wood"
+  go in required_materials. Someone who names a material rarely accepts a
+  different one.
+
 Rules for values:
 
   Express every length in centimetres. Convert metres and inches yourself.

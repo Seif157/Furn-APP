@@ -1102,7 +1102,26 @@ AI SEARCH
 ├── Phase 5A Natural-Language Parser         IMPLEMENTED LOCALLY (app/ai/)
 ├── Phase 5B SearchSpecification             DONE IN PHASE 4C (app/search/models.py)
 ├── Phase 5C Search Endpoint                 IMPLEMENTED LOCALLY (POST /v1/search)
-└── Phase 5D Search Evaluation               NEXT
+└── Phase 5D Search Evaluation               IMPLEMENTED, RUN 2026-09-17
+
+Phase 5D scored 48/48 on 16 cases at 3 repeats: extraction, field accuracy,
+recall and clarification all 100%, constraint violations and hallucinations
+both 0%. Ground truth is computed rather than listed, so the benchmark does not
+rot when the seed changes, and 13 tests check the benchmark itself can fail
+before it is allowed to grade anything. Design and the verdict are in
+docs/phase-5d-search-evaluation.md; run it with
+scripts/live_search_evaluation.py --i-have-authorization.
+
+Its first run caught a real inconsistency and forced a decision now written
+into the prompt: a colour the customer describes is a preference, a colour they
+demand is a requirement, and a material they name is always a requirement.
+
+Verdict on section 11: vector search is NOT yet justified. Structured
+retrieval already reaches 100% recall on every case, so there is nothing for
+semantic retrieval to recover, and the fuzzy cases where it would win (cosy,
+luxury, hotel-like) cannot be benchmarked at all because the enrichment tables
+are empty. Order is enrichment data, then fuzzy cases, then the vector
+decision.
 
 Phase 5C deliberately ships structured retrieval only, not the hybrid/vector
 retrieval the name implies: section 11 requires evaluation to prove vector
