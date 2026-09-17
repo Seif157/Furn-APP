@@ -21,6 +21,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SEED_SQL_PATH = PROJECT_ROOT / "seed" / "phase-5-fake-catalogue.sql"
 REMOVE_SQL_PATH = PROJECT_ROOT / "seed" / "phase-5-fake-catalogue-remove.sql"
+IMAGES_SQL_PATH = PROJECT_ROOT / "seed" / "phase-5-fake-catalogue-images.sql"
 
 CATEGORY_LABELS = {
     "beds": "Beds — أسرّة",
@@ -63,6 +64,67 @@ STYLE_WORDS = {
 }
 
 
+# Real furniture photographs from Unsplash, which serves them under a licence
+# that permits commercial use without attribution. Every id below was fetched
+# on 2026-09-17 and confirmed to return an image/jpeg body; none is a guess.
+# Photo ids are stable, and the rendering parameters are ours, so these URLs do
+# not drift. Placeholder images that read "SEED-017" made the catalogue look
+# unfinished in a demo, which is the whole reason these exist.
+UNSPLASH_RENDER = "?auto=format&fit=crop&w=800&h=600&q=80"
+CATEGORY_PHOTOS: dict[str, tuple[str, ...]] = {
+    "sofas": (
+        "1555041469-a586c61ea9bc",
+        "1567016432779-094069958ea5",
+        "1573866926487-a1865558a9cf",
+        "1512212621149-107ffe572d2f",
+        "1550581190-9c1c48d21d6c",
+        "1493663284031-b7e3aefcae8e",
+        "1519961655809-34fa156820ff",
+        "1567016376408-0226e4d0c1ea",
+    ),
+    "beds": (
+        "1564019472231-4586c552dc27",
+        "1635594202056-9ea3b497e5c0",
+        "1552858725-2758b5fb1286",
+        "1617325247661-675ab4b64ae2",
+        "1505693416388-ac5ce068fe85",
+        "1601276174812-63280a55656e",
+        "1552650272-b8a34e21bc4b",
+        "1556750539-dc6305f4f248",
+    ),
+    "dining": (
+        "1657524398377-567034729507",
+        "1614597445336-8a67e9314d91",
+        "1604578762246-41134e37f9cc",
+        "1606660023296-81d67734170a",
+        "1574966739987-65e38db0f7ce",
+        "1605239435870-67df4c54a0b3",
+        "1615066390971-03e4e1c36ddf",
+        "1602872030490-4a484a7b3ba6",
+    ),
+    "wardrobes": (
+        "1672137233327-37b0c1049e77",
+        "1567401893414-76b7b1e5a7a5",
+        "1649361811423-a55616f7ab11",
+        "1558997519-83ea9252edf8",
+        "1614631446501-abcf76949eca",
+        "1611048268330-53de574cae3b",
+        "1558769132-cb1aea458c5e",
+        "1567113463300-102a7eb3cb26",
+    ),
+    "chairs": (
+        "1580480055273-228ff5388ef8",
+        "1506439773649-6e0eb8cfb237",
+        "1612372606404-0ab33e7187ee",
+        "1581539250439-c96689b516dd",
+        "1598300042247-d088f8ab3a91",
+        "1592078615290-033ee584e267",
+        "1549497538-303791108f95",
+        "1567538096630-e0c55bd6374c",
+    ),
+}
+
+
 @dataclass(frozen=True, slots=True)
 class SeedColour:
     slug: str
@@ -99,6 +161,21 @@ class SeedProduct:
 
     def image_id(self, index: int) -> str:
         return f"7c000000-0000-4000-8000-{self.number:09d}{index:03d}"
+
+    @property
+    def image_url(self) -> str:
+        """A real photograph of this product's category.
+
+        Chosen by product number so the assignment is deterministic and a
+        rerun produces the same catalogue. Neighbouring products in a category
+        get different photos, which is what stops the grid looking duplicated.
+        """
+
+        photos = CATEGORY_PHOTOS[self.category]
+        return (
+            "https://images.unsplash.com/photo-"
+            f"{photos[self.number % len(photos)]}{UNSPLASH_RENDER}"
+        )
 
     @property
     def eligible(self) -> bool:
@@ -689,7 +766,7 @@ def upstream_payload(product: SeedProduct, *, category_id: str, seller_id: str) 
         "images": [
             {
                 "id": product.image_id(0),
-                "image_url": f"https://placehold.co/800x600?text={product.sku}",
+                "image_url": product.image_url,
                 "is_primary": True,
                 "display_order": 0,
                 "product_color_id": None,
@@ -722,9 +799,10 @@ def render_seed_sql() -> str:
         "",
         "Inserts 44 SEED- products: 41 recommendation-eligible (40 with",
         "dimensions and one without), plus one draft, one hidden, and one",
-        "published without stock; their colours; and one placeholder image each,",
-        "under the first approved",
-        "seller. Rendered by tests/seed_catalogue.py; do not hand-edit. Remove with",
+        "published without stock; their colours; and one real category photograph",
+        "each, all under the first approved seller.",
+        "",
+        "Rendered by tests/seed_catalogue.py; do not hand-edit. Remove with",
         "seed/phase-5-fake-catalogue-remove.sql. Never run against production.",
         "*/",
         "",
@@ -841,7 +919,7 @@ def render_seed_sql() -> str:
             (
                 _literal(product.image_id(0)) + "::uuid",
                 _literal(product.id) + "::uuid",
-                _literal(f"https://placehold.co/800x600?text={product.sku}"),
+                _literal(product.image_url),
                 "0",
                 "true",
                 "NULL",
@@ -885,6 +963,67 @@ def render_remove_sql() -> str:
     )
 
 
+def render_image_update_sql() -> str:
+    """SQL that refreshes image URLs on a seed already loaded into a database.
+
+    Re-running the insert is not an option once the rows exist, and dropping
+    and reinserting the whole seed is a bigger hammer than a changed image
+    warrants. This updates one column on rows that belong to SEED- products and
+    touches nothing else.
+    """
+
+    rows = [
+        "    ("
+        + _literal(product.image_id(0))
+        + "::uuid, "
+        + _literal(product.image_url)
+        + ")"
+        for product in SEED_PRODUCTS
+    ]
+    return "\n".join(
+        [
+            "/*",
+            "Refresh Phase 5 seed images -- FAKE-DATA TESTING BRANCH ONLY.",
+            "",
+            "Replaces the placeholder image on every SEED- product with a real",
+            "category photograph. Updates one column, inserts nothing, deletes",
+            "nothing, and matches only rows whose product carries a SEED- SKU.",
+            "Safe to run more than once.",
+            "",
+            "Rendered by tests/seed_catalogue.py; do not hand-edit.",
+            "*/",
+            "",
+            "BEGIN;",
+            "",
+            "SET LOCAL lock_timeout = '5s';",
+            "SET LOCAL statement_timeout = '2min';",
+            "",
+            "DO $image_preflight$",
+            "BEGIN",
+            "    IF NOT EXISTS (SELECT 1 FROM public.product WHERE sku LIKE 'SEED-%') THEN",
+            "        RAISE EXCEPTION 'no SEED- products found; load the seed first';",
+            "    END IF;",
+            "END",
+            "$image_preflight$;",
+            "",
+            "UPDATE public.product_image AS target",
+            "SET image_url = source.image_url",
+            "FROM (VALUES",
+            ",\n".join(rows),
+            ") AS source(id, image_url)",
+            "WHERE target.id = source.id",
+            "  AND EXISTS (",
+            "      SELECT 1 FROM public.product AS owner",
+            "      WHERE owner.id = target.product_id",
+            "        AND owner.sku LIKE 'SEED-%'",
+            "  );",
+            "",
+            "COMMIT;",
+            "",
+        ]
+    )
+
+
 def as_json_fixture() -> str:
     """All seed products as the gateway would return them, for offline tests."""
 
@@ -909,7 +1048,11 @@ if __name__ == "__main__":
     SEED_SQL_PATH.parent.mkdir(exist_ok=True)
     SEED_SQL_PATH.write_text(render_seed_sql(), encoding="utf-8", newline="\n")
     REMOVE_SQL_PATH.write_text(render_remove_sql(), encoding="utf-8", newline="\n")
+    IMAGES_SQL_PATH.write_text(
+        render_image_update_sql(), encoding="utf-8", newline="\n"
+    )
     print(
         f"wrote {SEED_SQL_PATH.relative_to(PROJECT_ROOT)} ({len(SEED_PRODUCTS)} products)"
     )
     print(f"wrote {REMOVE_SQL_PATH.relative_to(PROJECT_ROOT)}")
+    print(f"wrote {IMAGES_SQL_PATH.relative_to(PROJECT_ROOT)}")

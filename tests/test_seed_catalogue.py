@@ -115,7 +115,11 @@ def test_structured_search_over_the_seed_behaves_as_a_benchmark_should() -> None
 def test_rendered_sql_is_byte_identical_and_guarded() -> None:
     assert seed.SEED_SQL_PATH.read_text(encoding="utf-8") == seed.render_seed_sql()
     assert seed.REMOVE_SQL_PATH.read_text(encoding="utf-8") == seed.render_remove_sql()
-    for path in (seed.SEED_SQL_PATH, seed.REMOVE_SQL_PATH):
+    assert (
+        seed.IMAGES_SQL_PATH.read_text(encoding="utf-8")
+        == seed.render_image_update_sql()
+    )
+    for path in (seed.SEED_SQL_PATH, seed.REMOVE_SQL_PATH, seed.IMAGES_SQL_PATH):
         statements = parse_sql(path.read_text(encoding="utf-8"))
         assert isinstance(statements[0].stmt, ast.TransactionStmt)
         assert isinstance(statements[-1].stmt, ast.TransactionStmt)
@@ -129,10 +133,18 @@ def test_rendered_sql_is_byte_identical_and_guarded() -> None:
     assert "UPDATE " not in seed_sql and "DELETE " not in seed_sql
     assert "service_role" not in seed_sql
     assert len(re.findall(r"'SEED-\d{3}'", seed_sql)) == 44
-    assert seed_sql.count("placehold.co/800x600?text=SEED-") == 44
+    assert seed_sql.count("https://images.unsplash.com/photo-") == 44
+    assert "placehold.co" not in seed_sql
     remove_sql = seed.REMOVE_SQL_PATH.read_text(encoding="utf-8")
     assert remove_sql.count("sku LIKE 'SEED-%'") == 3
     assert "INSERT" not in remove_sql and "UPDATE " not in remove_sql
+    # The image refresh may only update, and only rows owned by SEED- products.
+    images_sql = seed.IMAGES_SQL_PATH.read_text(encoding="utf-8")
+    assert images_sql.count("UPDATE public.product_image") == 1
+    assert "INSERT" not in images_sql and "DELETE" not in images_sql
+    assert "DROP" not in images_sql and "TRUNCATE" not in images_sql
+    assert "sku LIKE 'SEED-%'" in images_sql
+    assert images_sql.count("https://images.unsplash.com/photo-") == 44
     # The seed lives outside sql/, which is reserved for reviewed migrations.
     assert seed.SEED_SQL_PATH.parent.name == "seed"
 
@@ -143,3 +155,30 @@ def test_json_fixture_round_trips_through_the_strict_upstream_model() -> None:
     assert all(row["seller"]["approval_state"] == "approved" for row in payload)
     assert all(row["enrichment_assignments"] == [] for row in payload)
     assert all(row["images"][0]["image_url"].startswith("https://") for row in payload)
+
+
+def test_every_seed_product_shows_a_photo_of_its_own_category() -> None:
+    # Placeholder images that read "SEED-017" made the catalogue look
+    # unfinished. Every product now carries a verified photograph, and it
+    # belongs to that product's category rather than being shared across all.
+    by_category: dict[str, set[str]] = {}
+    for product in seed.SEED_PRODUCTS:
+        assert product.image_url.startswith("https://images.unsplash.com/photo-")
+        assert "placehold" not in product.image_url
+        photo_id = product.image_url.split("photo-")[1].split("?")[0]
+        assert photo_id in seed.CATEGORY_PHOTOS[product.category]
+        by_category.setdefault(product.category, set()).add(photo_id)
+
+    # No category is reduced to a single repeated photo.
+    for category, photos in by_category.items():
+        assert len(photos) >= 4, category
+    # No photo is reused across categories, so a sofa never illustrates a bed.
+    all_photos = [p for photos in seed.CATEGORY_PHOTOS.values() for p in photos]
+    assert len(all_photos) == len(set(all_photos))
+
+
+def test_image_assignment_is_stable_across_runs() -> None:
+    # A rerun of the generator must not reshuffle the catalogue.
+    assert [product.image_url for product in seed.SEED_PRODUCTS] == [
+        product.image_url for product in seed._build()
+    ]
