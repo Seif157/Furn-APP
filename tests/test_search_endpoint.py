@@ -21,7 +21,7 @@ from app.auth.models import AuthenticatedUser
 from app.catalog.dependencies import get_catalogue_gateway
 from app.catalog.gateway import CatalogueGateway, SupabaseCatalogueGateway
 from app.main import app
-from app.search.dependencies import get_ai_provider
+from app.search.dependencies import get_optional_ai_provider
 from tests import seed_catalogue as seed
 from tests.test_catalog import TEST_ACCESS_TOKEN, TEST_USER_ID, build_test_settings
 
@@ -129,7 +129,7 @@ async def search_client(
             async def override_provider() -> StubProvider:
                 return provider
 
-            app.dependency_overrides[get_ai_provider] = override_provider
+            app.dependency_overrides[get_optional_ai_provider] = override_provider
         try:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
@@ -139,7 +139,7 @@ async def search_client(
         finally:
             app.dependency_overrides.pop(get_auth_gateway, None)
             app.dependency_overrides.pop(get_catalogue_gateway, None)
-            app.dependency_overrides.pop(get_ai_provider, None)
+            app.dependency_overrides.pop(get_optional_ai_provider, None)
 
 
 async def post_search(
@@ -210,11 +210,11 @@ async def test_the_response_says_what_the_backend_understood() -> None:
         response = await post_search(client, {"query": "a modern beige sofa"})
 
     interpretation = response.json()["interpretation"]
-    assert interpretation["category"] == "sofas"
+    assert interpretation["category"] == {"slug": "sofas", "label": "Sofas"}
     assert interpretation["price"] == {"minimum": None, "maximum": "15000"}
     assert interpretation["width_cm"] == {"minimum": None, "maximum": "220"}
     assert interpretation["in_stock_only"] is True
-    assert interpretation["preferred_colours"] == ["beige"]
+    assert interpretation["preferred_colours"] == [{"slug": "beige", "label": "beige"}]
     assert interpretation["styles"] == ["modern"]
 
 
@@ -244,8 +244,8 @@ async def test_an_arabic_sentence_searches_the_same_catalogue() -> None:
 
     payload = response.json()
     assert response.status_code == 200
-    assert payload["interpretation"]["category"] == "sofas"
-    assert payload["interpretation"]["preferred_colours"] == ["beige"]
+    assert payload["interpretation"]["category"]["slug"] == "sofas"
+    assert payload["interpretation"]["preferred_colours"][0]["slug"] == "beige"
     assert payload["match_count"] > 0
 
 
@@ -448,3 +448,123 @@ async def test_nothing_is_excluded_when_nothing_was_constrained() -> None:
         response = await post_search(client, {"query": "I need furniture"})
 
     assert response.json()["excluded_by"] == []
+
+
+# --- answering in the customer's language -----------------------------------
+
+
+@pytest.mark.anyio
+async def test_an_arabic_sentence_is_answered_with_arabic_labels() -> None:
+    provider = StubProvider(
+        {
+            "category": "كنب",
+            "required_materials": ["خشب زان"],
+            "preferred_colours": ["بيج"],
+            "max_price": 15000,
+        }
+    )
+
+    async with search_client(seed_response, provider) as client:
+        response = await post_search(client, {"query": "عايز كنبة بيج خشب زان"})
+
+    payload = response.json()
+    assert payload["language"] == "ar"
+    interpretation = payload["interpretation"]
+    assert interpretation["category"] == {"slug": "sofas", "label": "كنب"}
+    assert interpretation["materials"][0] == {
+        "slug": "beech_wood",
+        "label": "خشب زان",
+    }
+    assert interpretation["preferred_colours"][0]["label"] == "بيج"
+
+
+@pytest.mark.anyio
+async def test_the_same_search_in_english_keeps_the_same_slugs() -> None:
+    arabic = StubProvider({"category": "كنب", "preferred_colours": ["بيج"]})
+    english = StubProvider({"category": "Sofas", "preferred_colours": ["beige"]})
+
+    async with search_client(seed_response, arabic) as client:
+        arabic_payload = (await post_search(client, {"query": "عايز كنبة بيج"})).json()
+    async with search_client(seed_response, english) as client:
+        english_payload = (
+            await post_search(client, {"query": "I want a beige sofa"})
+        ).json()
+
+    # Labels differ, slugs do not, so a client can branch on one and show the
+    # other. The products returned are identical.
+    assert arabic_payload["language"] == "ar"
+    assert english_payload["language"] == "en"
+    assert arabic_payload["interpretation"]["category"]["label"] == "كنب"
+    assert english_payload["interpretation"]["category"]["label"] == "Sofas"
+    assert (
+        arabic_payload["interpretation"]["category"]["slug"]
+        == english_payload["interpretation"]["category"]["slug"]
+    )
+    assert [item["product"]["id"] for item in arabic_payload["items"]] == [
+        item["product"]["id"] for item in english_payload["items"]
+    ]
+
+
+@pytest.mark.anyio
+async def test_a_mixed_sentence_is_answered_in_arabic() -> None:
+    # An Egyptian customer reaching for an English product word is an Arabic
+    # speaker, not an English one.
+    provider = StubProvider({"category": "Sofas"})
+
+    async with search_client(seed_response, provider) as client:
+        response = await post_search(client, {"query": "عايز modern sofa"})
+
+    payload = response.json()
+    assert payload["language"] == "ar"
+    assert payload["interpretation"]["category"]["label"] == "كنب"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("query", "expected_language", "expected_message"),
+    [
+        ("عايز كنبة", "ar", "البحث غير متاح مؤقتًا. برجاء المحاولة بعد قليل."),
+        ("I need a sofa", "en", "Search is temporarily unavailable."),
+    ],
+)
+async def test_errors_are_reported_in_the_customers_language(
+    query: str, expected_language: str, expected_message: str
+) -> None:
+    provider = StubProvider(AIProviderUnavailableError())
+
+    async with search_client(unexpected_catalogue_call, provider) as client:
+        response = await post_search(client, {"query": query})
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    # The code never changes with language, so a client branches on it and
+    # shows the message.
+    assert detail["code"] == "search_unavailable"
+    assert detail["message"] == expected_message
+
+
+@pytest.mark.anyio
+async def test_an_untrustworthy_answer_is_explained_in_arabic() -> None:
+    provider = StubProvider(AIResponseInvalidError())
+
+    async with search_client(unexpected_catalogue_call, provider) as client:
+        response = await post_search(client, {"query": "عايز كنبة"})
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert detail["code"] == "search_upstream_error"
+    assert detail["message"] == "تعذّر فهم طلب البحث. برجاء إعادة صياغته."
+
+
+@pytest.mark.anyio
+async def test_product_text_is_never_translated() -> None:
+    # Catalogue text is a marketplace fact and is shown as the seller wrote it.
+    provider = StubProvider({"category": "Sofas"})
+
+    async with search_client(seed_response, provider) as client:
+        response = await post_search(client, {"query": "I want a sofa"})
+
+    payload = response.json()
+    assert payload["language"] == "en"
+    # Seed product names are Arabic; an English response keeps them Arabic.
+    assert any("كنبة" in item["product"]["name"] for item in payload["items"])

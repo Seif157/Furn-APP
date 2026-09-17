@@ -1081,6 +1081,15 @@ with the caller's own token through the existing gateway, so RLS still decides
 what is searchable, and ranking stays deterministic so the model shapes the
 question but never the answer.
 
+The response answers in the customer's language: any Arabic in the sentence,
+including a mixed sentence, gets Arabic. This is deterministic, not translated
+at request time. Phase 4C detects the language and the Phase 4B vocabularies
+supply both labels, so every term ships a stable slug plus a localized label,
+and error messages localize while their codes do not. Catalogue text is never
+translated because it is a marketplace fact. The "Answering in the customer's
+language" section of docs/phase-5c-search-endpoint.md records what is still
+English only.
+
 AI RECOMMENDATION
 ├── Phase 6A Ranking / Scoring
 ├── Phase 6B Compatibility

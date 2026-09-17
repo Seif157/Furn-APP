@@ -41,12 +41,17 @@ from app.catalog.gateway import (
 from app.catalog.normalization import normalize_product
 from app.catalog.transform import is_recommendation_eligible
 from app.search.dependencies import (
-    get_ai_provider,
+    get_optional_ai_provider,
     invalid_search_query,
     search_unavailable,
     search_upstream_error,
 )
-from app.search.models import DEFAULT_RESULTS, MAX_RESULTS, MAX_TEXT_LENGTH
+from app.search.models import (
+    DEFAULT_RESULTS,
+    MAX_RESULTS,
+    MAX_TEXT_LENGTH,
+    detect_language,
+)
 from app.search.responses import SearchResponse, build_search_response
 from app.search.service import search_products
 
@@ -79,23 +84,30 @@ async def search(
         Depends(get_authenticated_request),
     ],
     gateway: Annotated[CatalogueGateway, Depends(get_catalogue_gateway)],
-    provider: Annotated[AIProvider, Depends(get_ai_provider)],
+    provider: Annotated[AIProvider | None, Depends(get_optional_ai_provider)],
 ) -> SearchResponse:
     """Parse one sentence, then rank the products the caller is allowed to see."""
+
+    # Detected from the raw sentence rather than from the parsed specification,
+    # so a failure before or during parsing can still be reported in the
+    # customer's own language.
+    language = detect_language(search_request.query)
+    if provider is None:
+        raise search_unavailable(language)
 
     try:
         parsed = await parse_requirements(
             search_request.query, provider=provider, limit=search_request.limit
         )
-    except InvalidQueryError as error:
-        raise invalid_search_query(str(error)) from None
+    except InvalidQueryError:
+        raise invalid_search_query("query_empty", language) from None
     except AIProviderUnavailableError:
-        raise search_unavailable() from None
+        raise search_unavailable(language) from None
     except AIProviderError:
         # Everything else from the boundary is an untrustworthy answer. The
         # errors carry no prompt and no response body, so nothing is lost by
         # collapsing them here.
-        raise search_upstream_error() from None
+        raise search_upstream_error(language) from None
 
     try:
         products = await gateway.list_products(
@@ -135,6 +147,7 @@ async def search(
         results=results,
         specification=parsed.specification,
         query=search_request.query,
+        language=language,
         clarification=parsed.clarification,
         unresolved=parsed.unresolved,
         truncated=truncated,

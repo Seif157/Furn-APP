@@ -8,6 +8,10 @@ can change without breaking a client.
 Every product fact in a response comes from ``build_product_response``, the
 same transform the catalogue endpoints use, so search cannot expose a field
 the catalogue would have withheld.
+
+Terms carry a slug and a label. The slug is stable and is what a client should
+branch on; the label is display text in the customer's own language, taken from
+the Phase 4B vocabularies rather than translated at request time.
 """
 
 from __future__ import annotations
@@ -15,15 +19,25 @@ from __future__ import annotations
 from decimal import Decimal
 
 from app.catalog.models import ProductResponse, StrictResponseModel
+from app.catalog.normalization import CATEGORIES, COLOURS, MATERIALS, Vocabulary
 from app.catalog.transform import build_product_response
 from app.catalog.upstream_models import UpstreamProduct
+from app.search.localization import response_language, term_label
 from app.search.models import (
     DimensionRange,
+    Language,
     PriceRange,
     SearchSpecification,
     UnresolvedTerm,
 )
 from app.search.results import SearchResults
+
+
+class TermResponse(StrictResponseModel):
+    """A resolved vocabulary term: a stable slug and a label to show."""
+
+    slug: str
+    label: str
 
 
 class RangeResponse(StrictResponseModel):
@@ -41,17 +55,19 @@ class InterpretationResponse(StrictResponseModel):
     checking, so it is what the search actually ran.
     """
 
-    category: str | None
-    colours: tuple[str, ...]
-    materials: tuple[str, ...]
+    category: TermResponse | None
+    colours: tuple[TermResponse, ...]
+    materials: tuple[TermResponse, ...]
     price: RangeResponse | None
     width_cm: RangeResponse | None
     height_cm: RangeResponse | None
     depth_cm: RangeResponse | None
     in_stock_only: bool
-    preferred_colours: tuple[str, ...]
-    preferred_materials: tuple[str, ...]
+    preferred_colours: tuple[TermResponse, ...]
+    preferred_materials: tuple[TermResponse, ...]
     styles: tuple[str, ...]
+    """Matching keys against enrichment attributes, not display labels, so
+    these stay in English in every language."""
     room_type: str | None
 
 
@@ -60,17 +76,6 @@ class UnresolvedResponse(StrictResponseModel):
 
     field: str
     surface: str
-
-
-class SearchItemResponse(StrictResponseModel):
-    """One matching product and the grounded reason it matched."""
-
-    product: ProductResponse
-    score: Decimal
-    """Between 0 and 1. Soft-preference fit only; every item passed every
-    hard constraint, so this never explains exclusion."""
-    matched: tuple[str, ...]
-    """The hard constraints this product was checked against and satisfied."""
 
 
 class ExclusionResponse(StrictResponseModel):
@@ -89,8 +94,21 @@ class ExclusionResponse(StrictResponseModel):
     excluded: int
 
 
+class SearchItemResponse(StrictResponseModel):
+    """One matching product and the grounded reason it matched."""
+
+    product: ProductResponse
+    score: Decimal
+    """Between 0 and 1. Soft-preference fit only; every item passed every
+    hard constraint, so this never explains exclusion."""
+    matched: tuple[str, ...]
+    """The hard constraints this product was checked against and satisfied."""
+
+
 class SearchResponse(StrictResponseModel):
     query: str
+    language: str
+    """The language this response speaks: "ar" or "en"."""
     interpretation: InterpretationResponse
     items: tuple[SearchItemResponse, ...]
     limit: int
@@ -120,24 +138,41 @@ def _dimension_range(bounds: DimensionRange | None) -> RangeResponse | None:
     return RangeResponse(minimum=bounds.minimum_cm, maximum=bounds.maximum_cm)
 
 
+def _terms(
+    vocabulary: Vocabulary, slugs: tuple[str, ...], language: Language
+) -> tuple[TermResponse, ...]:
+    return tuple(
+        TermResponse(slug=slug, label=term_label(vocabulary, slug, language))
+        for slug in slugs
+    )
+
+
 def build_interpretation(
-    specification: SearchSpecification,
+    specification: SearchSpecification, language: Language
 ) -> InterpretationResponse:
-    """Describe the executed specification in client-facing terms."""
+    """Describe the executed specification in the customer's own language."""
 
     hard = specification.hard
     soft = specification.soft
+    category = (
+        TermResponse(
+            slug=hard.category,
+            label=term_label(CATEGORIES, hard.category, language),
+        )
+        if hard.category is not None
+        else None
+    )
     return InterpretationResponse(
-        category=hard.category,
-        colours=hard.colours,
-        materials=hard.materials,
+        category=category,
+        colours=_terms(COLOURS, hard.colours, language),
+        materials=_terms(MATERIALS, hard.materials, language),
         price=_price_range(hard.price),
         width_cm=_dimension_range(hard.width),
         height_cm=_dimension_range(hard.height),
         depth_cm=_dimension_range(hard.depth),
         in_stock_only=hard.in_stock_only,
-        preferred_colours=soft.colours,
-        preferred_materials=soft.materials,
+        preferred_colours=_terms(COLOURS, soft.colours, language),
+        preferred_materials=_terms(MATERIALS, soft.materials, language),
         styles=soft.styles,
         room_type=soft.room_type,
     )
@@ -149,6 +184,7 @@ def build_search_response(
     results: SearchResults,
     specification: SearchSpecification,
     query: str,
+    language: Language,
     clarification: str | None,
     unresolved: tuple[UnresolvedTerm, ...],
     truncated: bool,
@@ -179,7 +215,8 @@ def build_search_response(
 
     return SearchResponse(
         query=query,
-        interpretation=build_interpretation(specification),
+        language=response_language(language),
+        interpretation=build_interpretation(specification, language),
         items=tuple(items),
         limit=results.limit,
         match_count=results.match_count,
