@@ -544,9 +544,9 @@ AI converts it to:
 
 Then the backend searches real catalogue data.
 
-Status: **Parser implemented locally (Phase 5A, app/ai/) and verified against
-the live Gemini API on 2026-09-17. No HTTP route yet, so nothing is exposed to
-Flutter.**
+Status: **Implemented locally and driven end to end against the live Gemini
+API on 2026-09-17. Parser in app/ai/ (Phase 5A), endpoint POST /v1/search
+(Phase 5C). Not yet run against a real Supabase session.**
 
 ### 6.2 Requirement Extraction
 
@@ -1069,9 +1069,17 @@ does, and only with --i-have-authorization.
 
 AI SEARCH
 ├── Phase 5A Natural-Language Parser         IMPLEMENTED LOCALLY (app/ai/)
-├── Phase 5B SearchSpecification
-├── Phase 5C Hybrid Retrieval
-└── Phase 5D Search Evaluation
+├── Phase 5B SearchSpecification             DONE IN PHASE 4C (app/search/models.py)
+├── Phase 5C Search Endpoint                 IMPLEMENTED LOCALLY (POST /v1/search)
+└── Phase 5D Search Evaluation               NEXT
+
+Phase 5C deliberately ships structured retrieval only, not the hybrid/vector
+retrieval the name implies: section 11 requires evaluation to prove vector
+search earns its place, and that evaluation is Phase 5D. Design and the live
+run are in docs/phase-5c-search-endpoint.md. The endpoint reads the catalogue
+with the caller's own token through the existing gateway, so RLS still decides
+what is searchable, and ranking stays deterministic so the model shapes the
+question but never the answer.
 
 AI RECOMMENDATION
 ├── Phase 6A Ranking / Scoring

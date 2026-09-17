@@ -8,11 +8,13 @@ import httpx
 from fastapi import FastAPI, status
 from pydantic import BaseModel, ConfigDict
 
+from app.ai.providers.gemini import build_gemini_provider
 from app.auth.gateway import SupabaseAuthGateway
 from app.catalog.gateway import SupabaseCatalogueGateway
 from app.catalog.router import router as catalogue_router
-from app.config import load_settings
+from app.config import load_ai_settings, load_settings
 from app.routers.users import router as users_router
+from app.search.router import router as search_router
 
 
 class HealthResponse(BaseModel):
@@ -30,6 +32,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     """Create and close the shared outbound Supabase HTTP client."""
 
     settings = load_settings()
+    # Absent AI configuration is supported and leaves the provider unset, so
+    # only the search route refuses. Malformed AI configuration still raises,
+    # because a typo in a key should be loud rather than silently disabling a
+    # feature.
+    ai_settings = load_ai_settings()
     async with httpx.AsyncClient() as client:
         application.state.auth_gateway = SupabaseAuthGateway(
             client=client,
@@ -38,6 +45,10 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         application.state.catalogue_gateway = SupabaseCatalogueGateway(
             client=client,
             settings=settings,
+        )
+        application.state.ai_provider = build_gemini_provider(
+            client=client,
+            settings=ai_settings,
         )
         yield
 
@@ -62,3 +73,4 @@ async def get_health() -> HealthResponse:
 
 app.include_router(users_router)
 app.include_router(catalogue_router)
+app.include_router(search_router)
