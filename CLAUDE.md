@@ -68,7 +68,8 @@ Phase 3.1    Live Catalogue Verification           COMPLETE
 Phase 3.2A   Security Audit                        COMPLETE
 Phase 3.2B   Initial Security Hardening            APPLIED LIVE, VERIFICATION PASSED (13/13)
 Phase 3.2C   Correction + Reconciliation           APPLIED LIVE 2026-09-18, VERIFICATION PASSED (20/20)
-Phase 3.2D   Deferred-Finding Remediation          COMMITTED, PENDING HUMAN REVIEW
+Phase 3.2D   Deferred-Finding Remediation          APPLIED LIVE 2026-09-18, VERIFICATION PASSED (12/12)
+Checkout     place_order + stock return             APPLIED LIVE 2026-09-18, LIVE-TESTED
 Phase 4A-4D  AI Foundation                         COMMITTED (see section 13)
 Phase 5A     Natural-Language Parser               COMMITTED, LIVE-VERIFIED
 Phase 5C     Search Endpoint POST /v1/search       COMMITTED, LIVE-VERIFIED
@@ -129,11 +130,14 @@ Current status:
 Phase 3.2B migration:    APPLIED LIVE (found applied 2026-09-18); verification 13/13
 Phase 3.2C migration:    APPLIED LIVE 2026-09-18 from commit a34159d; verification 20/20
 Phase 3.2C undo:         rollback/phase-3.2c-undo-2026-09-18.sql (not run)
-Phase 3.2D preflight:    PASSED live 2026-09-18 (after fixing bug 9, commit b65dd89)
-Phase 3.2D migration:    NOT EXECUTED, held until Flutter is ready (see below)
+Phase 3.2D migration:    APPLIED LIVE 2026-09-18 from 7bedfb2 after a passing full rehearsal;
+                         verification 12/12; undo rollback/phase-3.2d-undo-2026-09-18.sql
+Checkout migration:      APPLIED LIVE from migrations/checkout-2026-09-18.sql (071ea16);
+                         33/33 on a PostgreSQL replica first; live order placed and
+                         cancelled 2026-09-19 00:06, stock returned
 Live acceptance:         NOT EXECUTED (3.2C utility needs fixture accounts)
-Approval:                3.2C applied at the user's decision without an independent
-                         security review; 3.2D still requires human review
+Approval:                3.2C, 3.2D and checkout applied at the user's decision without
+                         an independent security review
 Search with a real user session:  PASSED 2026-09-18 (scripts/live_search_smoke.py)
 Smoke test after 3.2C:   PASSED 2026-09-18 22:02 (search, follow-up, meta, public
                          reviews, similar, compare, room plan; real customer account)

@@ -80,6 +80,8 @@ error. Use `limits` for input lengths and counters instead of hard-coding them.
 | Room preview image | `POST /v1/rooms/image` | 10-20 s. Body is the plan's `image_request` |
 | Catalogue list and detail | `GET /v1/catalog/products`, `/{id}` | Or Supabase directly, as today |
 | Cart, before the first "add to cart" | `POST /v1/cart` | Returns `cart_id`; then add lines in Supabase |
+| Checkout | `supabase.rpc('place_order', …)` | One order per seller; see Checkout |
+| Cancel / advance an order | `supabase.rpc('cancel_purchase_order' / 'advance_purchase_order', …)` | See Supabase rules |
 
 ## The cart
 
@@ -105,11 +107,41 @@ await supabase.from('cart_line').insert({
 });
 ```
 
-Stop inserting into the `cart` table from the app. It still works today, but
-the 3.2D security package removes that permission, and after that only this
-endpoint can create a cart. Errors: 409 `customer_profile_required` (a seller
-or admin account, or a customer without a profile yet), 503
-`cart_unavailable` (retry).
+The app cannot insert into the `cart` table (security package 3.2D, applied
+2026-09-18); only this endpoint creates a cart. Errors: 409
+`customer_profile_required` (a seller or admin account, or a customer without
+a profile yet), 503 `cart_unavailable` (retry).
+
+A cart line can be added only for a product that is published, from an
+approved seller, in an active category, with stock in that colour. Only
+`quantity` can be changed afterwards; delete and re-add to change the colour.
+
+## Checkout
+
+Placing an order is one database call, made with the customer's own session:
+
+```dart
+final placed = await supabase.rpc('place_order', params: {'address_id': addressId});
+// [{"order_id": "…", "marketplace_party_id": "…"}, …]  one order per seller
+```
+
+In one transaction it rechecks every cart line (still for sale, enough stock),
+creates one order per seller at the current catalogue price (the discount
+price when lower), copies the delivery address onto the order, reserves the
+stock, and empties the cart. Delivery is free and payment is cash on delivery
+for now. If anything is wrong, nothing is written and it throws a
+`PostgrestException` whose `message` is one of:
+
+| `message` | Meaning | `details` |
+|---|---|---|
+| `cart_empty` | Nothing to order | |
+| `address_not_found` | Not one of this customer's addresses | |
+| `product_unavailable` | An item is no longer for sale | the `product_color_id` |
+| `insufficient_stock` | Not enough of a colour left | the `product_color_id` |
+| `customer_profile_required` | Not a customer account | |
+
+After a success, reload the cart (now empty) and show the orders. Tested live
+on 2026-09-18: one Cairo sofa ordered, stock 8 → 7, cancelled, stock back to 8.
 
 ## Conversation: follow-ups keep context
 
@@ -138,33 +170,100 @@ remembers nothing; the list lives in the app.
 8. **Label AI previews.** Show the response's `label` and `disclaimer` with
    every room preview; the product list, not the picture, is what is sold.
 
-## What changed in Supabase on 2026-09-18 (security package 3.2C)
+## Supabase rules the app must follow (final, applied 2026-09-18)
 
-These affect calls the app makes to Supabase directly:
+Security packages 3.2C and 3.2D and checkout are all applied and verified on
+the live project. These are the rules for calls the app makes to Supabase
+directly. Nothing further is planned to change them.
 
-- **Reviews.** A signed-in user can read only their own reviews from the
-  `review` table. Product and seller review lists must use
-  `GET /v1/reviews/public`. Writing a review is unchanged.
-- **Furnishing requests.** Insert without `id`, `lifecycle_state` or
-  `created_at`; a new request starts as `draft`. Change its state only with
-  the functions, not by updating `lifecycle_state`:
+**The general rule.** Writes accept only the columns listed below. Sending any
+other column, even with an unchanged value, fails with a permission error, so
+insert and update with exactly these keys.
 
-  ```dart
-  await supabase.rpc('open_furnishing_request', params: {'request_id': id});
-  await supabase.rpc('withdraw_furnishing_request', params: {'request_id': id});
-  ```
+### Orders
 
-  Each returns `true` if the change happened. Editing and deleting are
-  allowed only while the request is `draft` or `open`, and the address must
-  belong to the customer.
-- **Service directory.** Only active service types, and only capabilities of
-  approved parties with active services, are visible.
+- **Placing:** `place_order` only (see Checkout). The app cannot insert orders.
+- **Customer cancels** a `pending` order:
+  `supabase.rpc('cancel_purchase_order', params: {'order_id': id})` returns
+  `true` if it was cancelled. The reserved stock goes back automatically.
+- **Seller advances** one step at a time,
+  pending → confirmed → preparing → out_for_delivery → delivered:
+  `supabase.rpc('advance_purchase_order', params: {'order_id': id, 'next_state': 'confirmed'})`
+  returns `true` if the step was allowed.
+- **Seller may edit** only `notes`. The customer cannot edit an order.
+- Customers read their own orders, sellers the orders sent to them.
 
-Coming later (security package 3.2D, not applied): the app loses INSERT on
-`cart` (use `POST /v1/cart` now, and it keeps working), order status changes
-only through `advance_purchase_order` / `cancel_purchase_order`, service
-requests only through their four functions, and reviews can no longer be
-edited or deleted. Nothing else changes before 3.2D is applied.
+### Service requests
+
+- **Customer creates** with `customer_profile_id, service_type_id, address_id,
+  related_order_id, scheduled_date, scheduled_time, details`. It starts
+  `pending` with no seller.
+- **Customer may edit** `scheduled_date, scheduled_time, details` while pending,
+  and cancels with `cancel_service_request(request_id)`.
+- **Seller** calls `accept_service_request(request_id, agreed_price)` (pending),
+  `start_service_request(request_id)` (accepted) and
+  `complete_service_request(request_id)` (in progress). Each returns `true` if
+  it happened.
+
+### Reviews
+
+- **Write once:** insert `customer_profile_id, target_kind` and exactly one of
+  `target_product_id`, `target_service_request_id`, `target_marketplace_party_id`,
+  plus `rating, comment`. A product review needs a delivered order containing
+  that product; a service review needs a completed service request.
+- **No edit, no delete.** Hide those buttons.
+- **Lists:** `GET /v1/reviews/public` for any product or seller; a customer's
+  own reviews can still be read directly.
+
+### Other tables
+
+| Table | Insert columns | Update columns |
+|---|---|---|
+| `address` | customer_profile_id, label, recipient_name, contact_phone, address_line_1, address_line_2, city, country, latitude, longitude, is_default | the same minus customer_profile_id |
+| `cart_line` | cart_id, product_color_id, quantity | quantity |
+| `saved_space` | customer_profile_id, space_name, width_cm, depth_cm, measurement_source | space_name, width_cm, depth_cm, measurement_source |
+| `custom_offering` (seller) | marketplace_party_id, design_id, published_price, title, description, publication_state, published_at | the same minus marketplace_party_id |
+| `offer_line_item` (seller) | offer_id, line_kind, product_id, item_name, specification, unit_price, quantity, display_order | the same minus offer_id, only while the offer is submitted |
+| `party_capability` (seller) | marketplace_party_id, service_type_id, declared_at | none |
+| `design_product_reference` | design_id, product_id | none |
+
+An address cannot be deleted while an order, service request or furnishing
+request uses it.
+
+### Sellers (`marketplace_party`)
+
+Never `select('*')`: select these columns explicitly, or the request fails.
+
+- Anyone: `id, business_name, business_description, logo_url, coverage_area,
+  approval_state`
+- Signed in: the same plus `state_reason`
+
+Seller sign-up inserts `user_id, business_name, business_description,
+logo_url, coverage_area`; afterwards only the last four can be edited.
+
+### Furnishing requests (3.2C)
+
+Insert without `id`, `lifecycle_state` or `created_at`; a new request starts
+as `draft`. Change its state only with the functions:
+
+```dart
+await supabase.rpc('open_furnishing_request', params: {'request_id': id});
+await supabase.rpc('withdraw_furnishing_request', params: {'request_id': id});
+```
+
+Editing and deleting are allowed only while it is `draft` or `open`, and the
+address must belong to the customer.
+
+**Known gap:** attaching a design version to a furnishing request
+(`furnishing_request_design_version`) cannot be done from the app since 3.2D;
+the design says the server creates it, and that server step is not built yet.
+The app may only delete one while the request is `draft` or `open`. Hide
+"attach a design" until the backend endpoint exists.
+
+### Service directory
+
+Only active service types, and only capabilities of approved sellers with
+active services, are visible.
 
 ## Generating a client
 

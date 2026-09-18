@@ -245,3 +245,29 @@ sections passed. Until then, CLAUDE.md keeps reporting it as not executed.
   undo snapshot of everything 3.2D changes, run the migration, run its 12
   verification sections, run the smoke test, and run
   `scripts/live_phase_3_2d_acceptance.py`.
+
+### 2026-09-18/19, Phase 3.2D and checkout applied
+
+- 3.2D undo captured first: `rollback/phase-3.2d-undo-2026-09-18.sql` (the
+  snapshot mechanism passed a replica round trip). Not run.
+- 3.2D migration, first run: `postflight policy inventory mismatch`, rolled
+  back. A dry run (preflight and changes, then a block that reports the drift
+  and raises, so it cannot commit) showed bug 10: one expected policy listed a
+  single role literally named "anon,authenticated". Fixed (`80bd2a1`).
+- Full rehearsal (the whole migration with COMMIT replaced by a raise):
+  `postflight transition function mismatch`. Bug 11: the check required
+  `lifecycle_state::text = 'pending'` in every function, but
+  advance_purchase_order lists its allowed (from, to) pairs. Fixed (`7bedfb2`);
+  the rehearsal then reported every check passing.
+- **3.2D migration: applied** from `7bedfb2`, byte-identical to the passing
+  rehearsal up to COMMIT. **Verification 12/12.**
+- **Checkout migration (`migrations/checkout-2026-09-18.sql`, `071ea16`):
+  applied**, after passing 33 checks on a local PostgreSQL replica built from
+  the recorded schema with 3.2D's real order functions.
+- **Smoke test with `--checkout` as customer1: PASSED** at 00:06: the cart was
+  created, `place_order` ordered one Cairo sofa (stock 8 -> 7),
+  `cancel_purchase_order` cancelled it (stock 7 -> 8), and search, follow-ups,
+  similar, compare, reviews and room planning all work under 3.2D.
+- Known gap left by 3.2D: the app can no longer insert
+  `furnishing_request_design_version`; the design expects a backend AI step
+  that is not built.
