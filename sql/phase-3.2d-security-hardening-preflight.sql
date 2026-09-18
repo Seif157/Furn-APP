@@ -997,21 +997,21 @@ BEGIN
         SELECT 1
         FROM (
             VALUES
-                ('product'::pg_catalog.regclass, 'marketplace_party_id'::name),
-                ('product'::pg_catalog.regclass, 'category_id'::name),
-                ('product'::pg_catalog.regclass, 'lifecycle_state'::name),
-                ('product_color'::pg_catalog.regclass, 'product_id'::name),
-                ('product_color'::pg_catalog.regclass, 'stock_quantity'::name),
-                ('category'::pg_catalog.regclass, 'is_active'::name),
-                ('service_type'::pg_catalog.regclass, 'is_active'::name),
-                ('offer'::pg_catalog.regclass, 'marketplace_party_id'::name),
-                ('offer'::pg_catalog.regclass, 'lifecycle_state'::name),
-                ('design'::pg_catalog.regclass, 'originating_user_id'::name),
-                ('order_line_item'::pg_catalog.regclass, 'order_id'::name),
-                ('order_line_item'::pg_catalog.regclass, 'product_id'::name),
-                ('furnishing_request'::pg_catalog.regclass, 'address_id'::name),
-                ('furnishing_request'::pg_catalog.regclass, 'lifecycle_state'::name),
-                ('customer_profile'::pg_catalog.regclass, 'user_id'::name)
+                ('public.product'::pg_catalog.regclass, 'marketplace_party_id'::name),
+                ('public.product'::pg_catalog.regclass, 'category_id'::name),
+                ('public.product'::pg_catalog.regclass, 'lifecycle_state'::name),
+                ('public.product_color'::pg_catalog.regclass, 'product_id'::name),
+                ('public.product_color'::pg_catalog.regclass, 'stock_quantity'::name),
+                ('public.category'::pg_catalog.regclass, 'is_active'::name),
+                ('public.service_type'::pg_catalog.regclass, 'is_active'::name),
+                ('public.offer'::pg_catalog.regclass, 'marketplace_party_id'::name),
+                ('public.offer'::pg_catalog.regclass, 'lifecycle_state'::name),
+                ('public.design'::pg_catalog.regclass, 'originating_user_id'::name),
+                ('public.order_line_item'::pg_catalog.regclass, 'order_id'::name),
+                ('public.order_line_item'::pg_catalog.regclass, 'product_id'::name),
+                ('public.furnishing_request'::pg_catalog.regclass, 'address_id'::name),
+                ('public.furnishing_request'::pg_catalog.regclass, 'lifecycle_state'::name),
+                ('public.customer_profile'::pg_catalog.regclass, 'user_id'::name)
         ) AS expected_column(table_oid, column_name)
         WHERE NOT EXISTS (
             SELECT 1

@@ -35,11 +35,16 @@ PRESERVED_DIGESTS = {
     SQL_DIR / "phase-3.2b-security-hardening-verify.sql": (
         "79b4d303a0cb0852ea25307fa6f2a8da89555253ddc33dba9740f33b5cd0d411"
     ),
+    # Re-pinned 2026-09-18 with the user's approval after the first live
+    # preflight exposed three authoring bugs: unqualified relation names under
+    # search_path = pg_catalog, the review target-kind labels in the wrong
+    # order, and three policies expected on role public instead of the live
+    # {anon,authenticated}. Each fix matches the recorded live evidence.
     SQL_DIR / "phase-3.2c-security-hardening.sql": (
-        "50f6cd839c2583d004a419d8c23cb6e91b2e5f825e95a0aa3a2c58280d4d6e63"
+        "447de6a291d30d72088180e4aedc66d5d01ca68f59aba7f3cae6b2c58f3ba0d4"
     ),
     SQL_DIR / "phase-3.2c-security-hardening-preflight.sql": (
-        "b51d9a68d606807be023ce002a05827753877ae5785085af926098cc9423aa5d"
+        "97054ae7eb8d57df6798915166db71853b2092ecedd5bfbceae25f27a9c6f02c"
     ),
     SQL_DIR / "phase-3.2c-security-hardening-verify.sql": (
         "f43e298d930d07c6575a44abaa7f5c9015cafaf0bad38f1f23820f5e4cd6e140"
@@ -336,10 +341,10 @@ def test_preflight_pins_constraints_enums_and_referenced_columns() -> None:
         "'delivered', 'cancelled']::text[]" in block
     )
     for column in (
-        "('product_color'::pg_catalog.regclass, 'stock_quantity'::name)",
-        "('design'::pg_catalog.regclass, 'originating_user_id'::name)",
-        "('order_line_item'::pg_catalog.regclass, 'product_id'::name)",
-        "('furnishing_request'::pg_catalog.regclass, 'address_id'::name)",
+        "('public.product_color'::pg_catalog.regclass, 'stock_quantity'::name)",
+        "('public.design'::pg_catalog.regclass, 'originating_user_id'::name)",
+        "('public.order_line_item'::pg_catalog.regclass, 'product_id'::name)",
+        "('public.furnishing_request'::pg_catalog.regclass, 'address_id'::name)",
     ):
         assert column in block
 

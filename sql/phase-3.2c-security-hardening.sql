@@ -353,19 +353,19 @@ BEGIN
         SELECT 1
         FROM (
             VALUES
-                ('review'::pg_catalog.regclass, 'id'::name),
-                ('review'::pg_catalog.regclass, 'customer_profile_id'::name),
-                ('review'::pg_catalog.regclass, 'target_kind'::name),
-                ('review'::pg_catalog.regclass, 'target_product_id'::name),
-                ('review'::pg_catalog.regclass, 'target_marketplace_party_id'::name),
-                ('review'::pg_catalog.regclass, 'target_service_request_id'::name),
-                ('review'::pg_catalog.regclass, 'rating'::name),
-                ('review'::pg_catalog.regclass, 'comment'::name),
-                ('review'::pg_catalog.regclass, 'created_at'::name),
-                ('service_type'::pg_catalog.regclass, 'id'::name),
-                ('service_type'::pg_catalog.regclass, 'is_active'::name),
-                ('party_capability'::pg_catalog.regclass, 'marketplace_party_id'::name),
-                ('party_capability'::pg_catalog.regclass, 'service_type_id'::name)
+                ('public.review'::pg_catalog.regclass, 'id'::name),
+                ('public.review'::pg_catalog.regclass, 'customer_profile_id'::name),
+                ('public.review'::pg_catalog.regclass, 'target_kind'::name),
+                ('public.review'::pg_catalog.regclass, 'target_product_id'::name),
+                ('public.review'::pg_catalog.regclass, 'target_marketplace_party_id'::name),
+                ('public.review'::pg_catalog.regclass, 'target_service_request_id'::name),
+                ('public.review'::pg_catalog.regclass, 'rating'::name),
+                ('public.review'::pg_catalog.regclass, 'comment'::name),
+                ('public.review'::pg_catalog.regclass, 'created_at'::name),
+                ('public.service_type'::pg_catalog.regclass, 'id'::name),
+                ('public.service_type'::pg_catalog.regclass, 'is_active'::name),
+                ('public.party_capability'::pg_catalog.regclass, 'marketplace_party_id'::name),
+                ('public.party_capability'::pg_catalog.regclass, 'service_type_id'::name)
         ) AS expected_column(table_oid, column_name)
         WHERE NOT EXISTS (
             SELECT 1
@@ -543,8 +543,8 @@ BEGIN
         ORDER BY enum_value.enumsortorder
     ) IS DISTINCT FROM ARRAY[
         'product',
-        'marketplace_party',
-        'service_request'
+        'service_request',
+        'marketplace_party'
     ] THEN
         RAISE EXCEPTION USING
             MESSAGE = 'Phase 3.2C review target-kind enum drift';
@@ -580,7 +580,7 @@ BEGIN
           AND policy.policyname = 'review_select_public'
           AND policy.cmd = 'SELECT'
           AND policy.permissive = 'PERMISSIVE'
-          AND policy.roles = ARRAY['public']::name[]
+          AND policy.roles = ARRAY['anon', 'authenticated']::name[]
           AND btrim(lower(policy.qual), '() ') = 'true'
     ) OR NOT EXISTS (
         SELECT 1
@@ -598,7 +598,7 @@ BEGIN
           AND policy.tablename = 'service_type'
           AND policy.policyname = 'service_type_select_public'
           AND policy.cmd = 'SELECT'
-          AND policy.roles = ARRAY['public']::name[]
+          AND policy.roles = ARRAY['anon', 'authenticated']::name[]
           AND btrim(lower(policy.qual), '() ') = 'true'
     ) OR NOT EXISTS (
         SELECT 1
@@ -607,7 +607,7 @@ BEGIN
           AND policy.tablename = 'party_capability'
           AND policy.policyname = 'party_capability_select'
           AND policy.cmd = 'SELECT'
-          AND policy.roles = ARRAY['public']::name[]
+          AND policy.roles = ARRAY['anon', 'authenticated']::name[]
           AND btrim(lower(policy.qual), '() ') = 'true'
     ) THEN
         RAISE EXCEPTION USING

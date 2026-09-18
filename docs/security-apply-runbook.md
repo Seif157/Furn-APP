@@ -130,3 +130,29 @@ same way: preflight, core, 12 verify sections, and then
 
 After each package, note here the date, who ran it, and which verification
 sections passed. Until then, CLAUDE.md keeps reporting it as not executed.
+
+### 2026-09-18, run by the user in the SQL Editor
+
+- Status check: 36 `phase32b_` policies, 0 `phase32c_`, 0 `phase32d_`, 3
+  helpers, PostgreSQL 17.6. **3.2B was already applied to the live project**,
+  although the 3.2B document only records a testing-branch run.
+- 3.2B verification summary (section 14): all 13 sections passed, every
+  `failed_count` 0.
+- 3.2C preflight, first live run: failed four times, each time on a bug in the
+  package rather than drift in the database. Every fix makes the file match
+  the evidence recorded from the live database:
+  1. `42P01 relation "review" does not exist`. The files set
+     `search_path = pg_catalog` and then cast unqualified names such as
+     `'review'::pg_catalog.regclass`, which resolve only in `pg_catalog`. Fixed
+     by qualifying with `public.` in 3.2C (13 names) and in the 3.2D generator
+     (15 names). `tests/test_security_sql_name_resolution.py` now fails on
+     any recurrence.
+  2. `review target-kind enum drift`. The check expected `product,
+     marketplace_party, service_request`; live and the recorded evidence are
+     `product, service_request, marketplace_party`.
+  3. `target policy baseline drift`. Three policies were expected on role
+     `public`; live and the recorded evidence are `{anon,authenticated}`,
+     which is narrower. Confirmed with a read-only diagnostic.
+- 3.2C preflight after the fixes: **Success. No rows returned.** Nothing
+  changed.
+- The byte pins on the two 3.2C files were updated with the user's approval.
