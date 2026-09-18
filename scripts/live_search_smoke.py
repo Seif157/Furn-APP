@@ -9,12 +9,14 @@ missing compared with the running server is the network socket.
 
     uv run python -m scripts.live_search_smoke            # search + room plan
     uv run python -m scripts.live_search_smoke --render   # also the preview image
+    uv run python -m scripts.live_search_smoke --cart     # also create/fetch the cart
 
 It asks for an email and a password in your terminal. The password is read
 without echo, and neither it nor the session token is ever printed, logged, or
 written anywhere. Typing them in is the authorization; nothing runs without it.
-It spends five Gemini calls, six with --render, and writes nothing
-except the preview image when asked for one.
+It spends five Gemini calls, six with --render. It writes nothing except the
+preview image file when asked for one, and, only with --cart, this account's
+one empty cart in Supabase if it has none yet.
 """
 
 from __future__ import annotations
@@ -101,7 +103,7 @@ def show_search(sentence: str, response: httpx.Response) -> bool:
     return True
 
 
-async def run(*, render: bool, skip_rooms: bool) -> int:
+async def run(*, render: bool, skip_rooms: bool, cart: bool) -> int:
     try:
         settings = load_settings()
     except RuntimeError:
@@ -158,6 +160,9 @@ async def run(*, render: bool, skip_rooms: bool) -> int:
             if ok:
                 ok = await check_compare_and_similar(client, headers) and ok
 
+            if ok and cart:
+                ok = await check_cart(client, headers) and ok
+
             if ok and not skip_rooms:
                 ok = await check_room(client, headers, render=render) and ok
 
@@ -170,6 +175,28 @@ async def run(*, render: bool, skip_rooms: bool) -> int:
         else "\nFAILED"
     )
     return 0 if ok else 1
+
+
+async def check_cart(client: httpx.AsyncClient, headers: dict[str, str]) -> bool:
+    """The first call may create the cart; the second must return the same one."""
+
+    print("\ncart (POST /v1/cart twice)")
+    first = await client.post("/v1/cart", headers=headers)
+    second = await client.post("/v1/cart", headers=headers)
+    if first.status_code != 200 or second.status_code != 200:
+        codes = [
+            (r.status_code, r.json().get("detail", {}).get("code"))
+            for r in (first, second)
+        ]
+        print(f"  FAILED  {codes}")
+        return False
+    a, b = first.json(), second.json()
+    same = a["cart_id"] == b["cart_id"] and not b["created"]
+    print(
+        f"  {'ok' if same else 'FAILED'}  first call created={a['created']}, "
+        f"second call created={b['created']}, same cart={a['cart_id'] == b['cart_id']}"
+    )
+    return same
 
 
 async def check_meta_and_refinement(
@@ -303,10 +330,20 @@ def main() -> int:
         help="Also render the room preview image (one image-model call).",
     )
     parser.add_argument("--skip-rooms", action="store_true", help="Check search only.")
+    parser.add_argument(
+        "--cart",
+        action="store_true",
+        help="Also call POST /v1/cart twice. Creates this account's one empty "
+        "cart if it has none: a real write.",
+    )
     arguments = parser.parse_args()
     try:
         return asyncio.run(
-            run(render=arguments.render, skip_rooms=arguments.skip_rooms)
+            run(
+                render=arguments.render,
+                skip_rooms=arguments.skip_rooms,
+                cart=arguments.cart,
+            )
         )
     except KeyboardInterrupt:
         return 130
