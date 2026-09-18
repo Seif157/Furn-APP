@@ -203,6 +203,14 @@ sections passed. Until then, CLAUDE.md keeps reporting it as not executed.
      all `postgres`, none grantable) as unexpected. The 3.2B check that
      passed live excludes them with `acl.grantee <> defaclrole`; this copy did
      not. 3.2C does not touch storage.
+- **3.2C verification, second run: all 20 sections passed**, every
+  `failed_count` 0 (section 11: 3 of 3; section 20: 36 of 36).
+- Backend check after 3.2C (read-only): `GET /v1/reviews/public` returns 200
+  as anon, so the seven-column anon grant works as designed; `/health` 200.
+- Still to do for 3.2C: the signed-in smoke test
+  (`scripts/live_search_smoke.py`), the Flutter walkthrough, and the staged
+  live acceptance utility `scripts/live_phase_3_2c_acceptance.py`, which needs
+  fixture accounts and has not been run.
 - The snapshot shows that before 3.2C, anon and authenticated held INSERT,
   UPDATE, DELETE, TRUNCATE, TRIGGER, REFERENCES and MAINTAIN on the
   `order_financial_position` view. 3.2C removes them; the undo would restore

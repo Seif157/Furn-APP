@@ -66,8 +66,8 @@ Phase 2      Supabase Authentication               COMPLETE
 Phase 3      Catalogue Integration                 COMPLETE
 Phase 3.1    Live Catalogue Verification           COMPLETE
 Phase 3.2A   Security Audit                        COMPLETE
-Phase 3.2B   Initial Security Hardening            COMPLETE PACKAGE
-Phase 3.2C   Correction + Reconciliation           COMMITTED, PENDING HUMAN REVIEW
+Phase 3.2B   Initial Security Hardening            APPLIED LIVE, VERIFICATION PASSED (13/13)
+Phase 3.2C   Correction + Reconciliation           APPLIED LIVE 2026-09-18, VERIFICATION PASSED (20/20)
 Phase 3.2D   Deferred-Finding Remediation          COMMITTED, PENDING HUMAN REVIEW
 Phase 4A-4D  AI Foundation                         COMMITTED (see section 13)
 Phase 5A     Natural-Language Parser               COMMITTED, LIVE-VERIFIED
@@ -126,12 +126,27 @@ Supabase Auth leg:       reachable; a bogus token returns 401 invalid_access_tok
 Current status:
 
 ```text
-Phase 3.2C migration:    NOT EXECUTED
-Phase 3.2D migration:    NOT EXECUTED (requires 3.2C applied first)
-Live acceptance:         NOT EXECUTED
-Approval:                HUMAN SECURITY REVIEW REQUIRED (both packages)
+Phase 3.2B migration:    APPLIED LIVE (found applied 2026-09-18); verification 13/13
+Phase 3.2C migration:    APPLIED LIVE 2026-09-18 from commit a34159d; verification 20/20
+Phase 3.2C undo:         rollback/phase-3.2c-undo-2026-09-18.sql (not run)
+Phase 3.2D migration:    NOT EXECUTED, held (see below)
+Live acceptance:         NOT EXECUTED (3.2C utility needs fixture accounts)
+Approval:                3.2C applied at the user's decision without an independent
+                         security review; 3.2D still requires human review
 Search with a real user session:  PASSED 2026-09-18 (scripts/live_search_smoke.py)
 ```
+
+Applying 3.2C exposed eight bugs in the package, none in the database: six in
+the migration and preflight (unqualified names under `search_path =
+pg_catalog`, a wrong enum order, wrong policy roles, `pg_catalog.boolean` /
+`integer`, an exact-only empty `search_path` match, and `aclexplode` on an
+empty array) and two in the verification file (policy text printed without
+`public.`, and the storage owner's own privileges). Each was confirmed against
+live data before it was fixed, and `tests/test_security_sql_name_resolution.py`
+now fails on every one of those patterns. The 3.2D generator shares the first
+several and was fixed too, but 3.2D has still never run against a database:
+expect its preflight to find more. The full record is in
+docs/security-apply-runbook.md.
 
 On 2026-09-18 the user decided to apply 3.2B and 3.2C directly to the live
 project, skipping the testing-branch step. The user runs each file in the
