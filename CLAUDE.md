@@ -80,7 +80,7 @@ Branches (all pushed to origin, none merged):
 main                              b7931a0
 phase-3.2c-security-hardening     fb3e0ca  (PR target: main)
 phase-3.2d-security-hardening     78ae8c3  (stacked on 3.2C; PR target: the 3.2C branch)
-phase-4a-catalogue-audit          60d435e  (stacked on 3.2D; holds Phase 4 and 5)
+phase-4a-catalogue-audit          (tip)    (stacked on 3.2D; holds Phases 4, 5 and 6)
 ```
 
 The branch name predates its contents: `phase-4a-catalogue-audit` carries all
@@ -105,7 +105,7 @@ it without explicit authorization).
 Latest verification (2026-09-17, on the phase-4a-catalogue-audit branch):
 
 ```text
-pytest:                  533 passed
+pytest:                  575 passed
 ruff:                    passed
 format:                  passed
 git diff --check:        clean
@@ -125,7 +125,8 @@ Phase 3.2C migration:    NOT EXECUTED
 Phase 3.2D migration:    NOT EXECUTED (requires 3.2C applied first)
 Live acceptance:         NOT EXECUTED
 Approval:                HUMAN SECURITY REVIEW REQUIRED (both packages)
-Search with a real user session:  NOT YET EXERCISED (needs a signed-in account)
+Search with a real user session:  NOT YET EXERCISED; run
+                                  scripts/live_search_smoke.py from PowerShell
 ```
 
 Starting the API: `uv run python -m scripts.serve`. Not `uv run uvicorn`, which

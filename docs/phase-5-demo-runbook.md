@@ -29,8 +29,18 @@ does. Worth knowing before demo morning rather than during it.
 5. A request with a nonsense token returns 401 `invalid_access_token`. This one
    matters: it proves the app really reached Supabase Auth and Supabase
    rejected the token, so the authentication leg is live rather than assumed.
-6. Sign in through Flutter and make one real search. This is the only step that
-   cannot be checked without a user account, and it is the last unproven link.
+6. Prove search with a real signed-in session. From PowerShell or cmd, not Git
+   Bash:
+
+   ```bash
+   uv run python -m scripts.live_search_smoke
+   ```
+
+   It asks for a real account's email and password, signs in to Supabase, and
+   runs three searches through the real application with that user's token.
+   The password is read without echo and neither it nor the token is printed.
+   `PASSED` at the end means the last unproven link is proven. Git Bash is
+   refused because it cannot hide the password.
 
 ## Sentences that hold up
 
