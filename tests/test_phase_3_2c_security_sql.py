@@ -752,7 +752,7 @@ def test_transition_functions_are_exact_uniform_and_narrow() -> None:
     ]
     for function in (open_function, withdraw_function):
         body = function[function.index("as $function$") : function.index("$function$;")]
-        assert "returns pg_catalog.boolean" in function
+        assert "returns pg_catalog.bool " in function
         assert (
             "language plpgsql volatile security definer set search_path = ''"
             in function

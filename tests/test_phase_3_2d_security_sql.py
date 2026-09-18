@@ -40,14 +40,19 @@ PRESERVED_DIGESTS = {
     # search_path = pg_catalog, the review target-kind labels in the wrong
     # order, and three policies expected on role public instead of the live
     # {anon,authenticated}. Each fix matches the recorded live evidence.
+    # Re-pinned again the same evening after the first live run of the
+    # migration failed with 42704: pg_catalog.boolean and pg_catalog.integer
+    # are not type names (bool and int4 are), and an empty search_path is
+    # stored as search_path="" so exact matches on 'search_path=' now accept
+    # both spellings, as the applied 3.2B package does.
     SQL_DIR / "phase-3.2c-security-hardening.sql": (
-        "447de6a291d30d72088180e4aedc66d5d01ca68f59aba7f3cae6b2c58f3ba0d4"
+        "a73f59a24fb7f48c8207a9a951d627f9aa7576b83bb8a8fefe5fb0f4c886156c"
     ),
     SQL_DIR / "phase-3.2c-security-hardening-preflight.sql": (
         "97054ae7eb8d57df6798915166db71853b2092ecedd5bfbceae25f27a9c6f02c"
     ),
     SQL_DIR / "phase-3.2c-security-hardening-verify.sql": (
-        "f43e298d930d07c6575a44abaa7f5c9015cafaf0bad38f1f23820f5e4cd6e140"
+        "2a5fb642ca92a8c8da1ff32be5fb51e63b3ed5c2bab3d2fd3f39b23c212b2e6d"
     ),
     SQL_DIR / "phase-3.2c-rls-policy-audit.sql": (
         "3e3d0f36e3482877bc02c8ead12ea2ceda402c9838966e45b1324b4bed1e3e98"
@@ -677,7 +682,7 @@ def test_transition_functions_are_exact_uniform_and_narrow() -> None:
     for name, expected_sets in FUNCTION_SET_LISTS.items():
         function = bodies[name]
         body = function[function.index("as $function$") : function.index("$function$;")]
-        assert "returns pg_catalog.boolean" in function
+        assert "returns pg_catalog.bool " in function
         assert (
             "language plpgsql volatile security definer set search_path = ''"
             in function

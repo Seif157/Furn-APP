@@ -35,7 +35,7 @@ comparison AS (
         AND candidate.provolatile = 's'::pg_catalog."char"
         AND candidate.prosecdef
         AND candidate.proowner = roles.postgres_oid
-        AND candidate.proconfig = ARRAY['search_path=']::text[]
+        AND candidate.proconfig IN (ARRAY['search_path=']::text[], ARRAY['search_path=""']::text[])
         AND lower(candidate.prosrc) LIKE '%public.customer_profile%'
         AND lower(candidate.prosrc) LIKE '%auth.uid()%'
         AND NOT pg_catalog.has_function_privilege(
@@ -611,7 +611,7 @@ comparison AS (
         expected.function_name,
         function_metadata.oid IS NOT NULL
         AND function_metadata.prorettype =
-            'pg_catalog.boolean'::pg_catalog.regtype
+            'pg_catalog.bool'::pg_catalog.regtype
         AND function_metadata.prolang = (
             SELECT language.oid
             FROM pg_catalog.pg_language AS language
@@ -620,7 +620,7 @@ comparison AS (
         AND function_metadata.provolatile = 'v'::pg_catalog."char"
         AND function_metadata.prosecdef
         AND function_metadata.proowner = roles.postgres_oid
-        AND function_metadata.proconfig = ARRAY['search_path=']::text[]
+        AND function_metadata.proconfig IN (ARRAY['search_path=']::text[], ARRAY['search_path=""']::text[])
         AND lower(function_metadata.prosrc)
             LIKE '%"public".furnishing_request%'
         AND lower(function_metadata.prosrc) LIKE '%public.customer_profile%'

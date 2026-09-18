@@ -164,6 +164,18 @@ sections passed. Until then, CLAUDE.md keeps reporting it as not executed.
   touches no data rows. It lives outside `sql/` because only reviewed
   migrations may contain DDL there. Run it in the SQL Editor only if 3.2C must
   be reversed.
+- 3.2C migration, first live run: `42704 type "pg_catalog.boolean" does not
+  exist`, rolled back, nothing changed. Two more authoring bugs, fixed in 3.2C
+  and the 3.2D generator:
+  4. `pg_catalog.boolean` and `pg_catalog.integer` are not type names; the
+     qualified names are `pg_catalog.bool` and `pg_catalog.int4`.
+  5. An empty search path is stored as `search_path=""` (confirmed live on
+     `is_admin`, which 3.2B set up the same way), so post-change checks that
+     required exactly `search_path=` would have failed next. They now accept
+     both spellings, as 3.2B does.
+  A read-only query also confirmed the helper's current grantees are only
+  PUBLIC, postgres, anon, authenticated and service_role, all covered by the
+  migration's REVOKE.
 - The snapshot shows that before 3.2C, anon and authenticated held INSERT,
   UPDATE, DELETE, TRUNCATE, TRIGGER, REFERENCES and MAINTAIN on the
   `order_financial_position` view. 3.2C removes them; the undo would restore

@@ -47,7 +47,41 @@ def test_no_unqualified_relation_literal(path: Path) -> None:
     assert found == [], f"qualify with public.: {found}"
 
 
+SECURITY_SQL = sorted(SQL_DIR.glob("phase-3.2[bcd]-security-hardening*.sql"))
+
+# SQL-standard spellings that PostgreSQL accepts only unqualified. Qualified,
+# the real names are bool, int4, int2, int8, float4, float8 and numeric, so
+# `pg_catalog.boolean` fails with 42704, which stopped the first live run of
+# the 3.2C migration on 2026-09-18.
+KEYWORD_ONLY_TYPE = re.compile(
+    r"pg_catalog\.(boolean|integer|int|smallint|bigint|real|decimal|dec|float"
+    r"|double precision|character varying|character)\b"
+)
+
+
+@pytest.mark.parametrize("path", SECURITY_SQL, ids=lambda path: path.name)
+def test_no_keyword_only_type_is_schema_qualified(path: Path) -> None:
+    found = sorted(set(KEYWORD_ONLY_TYPE.findall(path.read_text(encoding="utf-8"))))
+    assert found == [], f"use the pg_catalog type name instead: {found}"
+
+
+@pytest.mark.parametrize("path", SECURITY_SQL, ids=lambda path: path.name)
+def test_an_empty_search_path_is_matched_in_both_stored_spellings(path: Path) -> None:
+    # SET search_path = '' is stored as search_path="" because search_path is a
+    # quoted list setting. A check that accepts only 'search_path=' fails on a
+    # correctly configured function, and the migration rolls back.
+    text = path.read_text(encoding="utf-8")
+    exact_only = re.findall(
+        r"(?:=|IS DISTINCT FROM)\s*ARRAY\['search_path='\]::text\[\]", text
+    )
+    assert exact_only == []
+
+
 def test_the_check_would_catch_the_original_bug() -> None:
+    assert KEYWORD_ONLY_TYPE.findall("RETURNS pg_catalog.boolean")
+    assert KEYWORD_ONLY_TYPE.findall("affected_rows pg_catalog.integer;")
+    assert not KEYWORD_ONLY_TYPE.findall("RETURNS pg_catalog.bool")
+    assert not KEYWORD_ONLY_TYPE.findall("x pg_catalog.int4; y pg_catalog.timestamptz")
     assert UNQUALIFIED_RELATION.findall("('review'::pg_catalog.regclass, 'id'::name)")
     assert not UNQUALIFIED_RELATION.findall(
         "('public.review'::pg_catalog.regclass, 'id'::name)"

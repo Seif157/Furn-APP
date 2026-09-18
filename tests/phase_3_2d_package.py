@@ -996,7 +996,7 @@ BEGIN
               AND function_metadata.prorettype = helper.return_type
               AND function_metadata.prosecdef
               AND function_metadata.proowner = postgres_role_oid
-              AND function_metadata.proconfig = ARRAY['search_path=']::text[]
+              AND function_metadata.proconfig IN (ARRAY['search_path=']::text[], ARRAY['search_path=""']::text[])
         )
     ) THEN
         RAISE EXCEPTION USING
@@ -1842,14 +1842,14 @@ WITH CHECK (
 CREATE OR REPLACE FUNCTION public.cancel_service_request(
     request_id pg_catalog.uuid
 )
-RETURNS pg_catalog.boolean
+RETURNS pg_catalog.bool
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
 AS $function$
 DECLARE
-    affected_rows pg_catalog.integer;
+    affected_rows pg_catalog.int4;
 BEGIN
     UPDATE "public".service_request AS request_row
     SET lifecycle_state = 'cancelled'
@@ -1873,7 +1873,7 @@ CREATE OR REPLACE FUNCTION public.accept_service_request(
     request_id pg_catalog.uuid,
     agreed_price pg_catalog.numeric
 )
-RETURNS pg_catalog.boolean
+RETURNS pg_catalog.bool
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
@@ -1881,7 +1881,7 @@ SET search_path = ''
 AS $function$
 DECLARE
     caller_party pg_catalog.uuid;
-    affected_rows pg_catalog.integer;
+    affected_rows pg_catalog.int4;
 BEGIN
     IF agreed_price IS NULL OR agreed_price < 0 THEN
         RETURN false;
@@ -1921,14 +1921,14 @@ $function$;
 CREATE OR REPLACE FUNCTION public.start_service_request(
     request_id pg_catalog.uuid
 )
-RETURNS pg_catalog.boolean
+RETURNS pg_catalog.bool
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
 AS $function$
 DECLARE
-    affected_rows pg_catalog.integer;
+    affected_rows pg_catalog.int4;
 BEGIN
     UPDATE "public".service_request AS request_row
     SET lifecycle_state = 'in_progress'
@@ -1952,14 +1952,14 @@ $function$;
 CREATE OR REPLACE FUNCTION public.complete_service_request(
     request_id pg_catalog.uuid
 )
-RETURNS pg_catalog.boolean
+RETURNS pg_catalog.bool
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
 AS $function$
 DECLARE
-    affected_rows pg_catalog.integer;
+    affected_rows pg_catalog.int4;
 BEGIN
     UPDATE "public".service_request AS request_row
     SET lifecycle_state = 'completed',
@@ -2002,14 +2002,14 @@ CREATE OR REPLACE FUNCTION public.advance_purchase_order(
     order_id pg_catalog.uuid,
     next_state public.order_state
 )
-RETURNS pg_catalog.boolean
+RETURNS pg_catalog.bool
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
 AS $function$
 DECLARE
-    affected_rows pg_catalog.integer;
+    affected_rows pg_catalog.int4;
 BEGIN
     IF next_state IS NULL THEN
         RETURN false;
@@ -2042,14 +2042,14 @@ $function$;
 CREATE OR REPLACE FUNCTION public.cancel_purchase_order(
     order_id pg_catalog.uuid
 )
-RETURNS pg_catalog.boolean
+RETURNS pg_catalog.bool
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
 AS $function$
 DECLARE
-    affected_rows pg_catalog.integer;
+    affected_rows pg_catalog.int4;
 BEGIN
     UPDATE "public".purchase_order AS order_row
     SET lifecycle_state = 'cancelled',
@@ -2380,7 +2380,7 @@ BEGIN
            OR function_metadata.provolatile <> 'v'::pg_catalog."char"
            OR NOT function_metadata.prosecdef
            OR function_metadata.proowner <> postgres_role_oid
-           OR function_metadata.proconfig IS DISTINCT FROM ARRAY['search_path=']::text[]
+           OR coalesce(function_metadata.proconfig NOT IN (ARRAY['search_path=']::text[], ARRAY['search_path=""']::text[]), true)
            OR lower(function_metadata.prosrc) NOT LIKE '%auth.uid()%'
            OR lower(function_metadata.prosrc) NOT LIKE
                   '%lifecycle_state::text = ''' || expected.old_state || '''%'
@@ -2832,7 +2832,7 @@ comparison AS (
         AND function_metadata.provolatile = 'v'::pg_catalog."char"
         AND function_metadata.prosecdef
         AND function_metadata.proowner = roles.postgres_oid
-        AND function_metadata.proconfig = ARRAY['search_path=']::text[]
+        AND function_metadata.proconfig IN (ARRAY['search_path=']::text[], ARRAY['search_path=""']::text[])
         AND lower(function_metadata.prosrc) LIKE '%auth.uid()%'
         AND lower(function_metadata.prosrc)
             LIKE '%lifecycle_state::text = ''' || expected.old_state || '''%'
@@ -2913,7 +2913,7 @@ comparison AS (
         AND function_metadata.prorettype = expected.return_type
         AND function_metadata.prosecdef
         AND function_metadata.proowner = roles.postgres_oid
-        AND function_metadata.proconfig = ARRAY['search_path=']::text[]
+        AND function_metadata.proconfig IN (ARRAY['search_path=']::text[], ARRAY['search_path=""']::text[])
         AND NOT pg_catalog.has_function_privilege(roles.anon_oid, function_metadata.oid, 'EXECUTE') AS passed
     FROM expected
     CROSS JOIN roles

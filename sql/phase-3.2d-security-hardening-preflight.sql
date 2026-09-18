@@ -249,7 +249,7 @@ BEGIN
               AND function_metadata.prorettype = helper.return_type
               AND function_metadata.prosecdef
               AND function_metadata.proowner = postgres_role_oid
-              AND function_metadata.proconfig = ARRAY['search_path=']::text[]
+              AND function_metadata.proconfig IN (ARRAY['search_path=']::text[], ARRAY['search_path=""']::text[])
         )
     ) THEN
         RAISE EXCEPTION USING

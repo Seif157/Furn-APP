@@ -868,7 +868,7 @@ comparison AS (
         AND function_metadata.provolatile = 'v'::pg_catalog."char"
         AND function_metadata.prosecdef
         AND function_metadata.proowner = roles.postgres_oid
-        AND function_metadata.proconfig = ARRAY['search_path=']::text[]
+        AND function_metadata.proconfig IN (ARRAY['search_path=']::text[], ARRAY['search_path=""']::text[])
         AND lower(function_metadata.prosrc) LIKE '%auth.uid()%'
         AND lower(function_metadata.prosrc)
             LIKE '%lifecycle_state::text = ''' || expected.old_state || '''%'
@@ -969,7 +969,7 @@ comparison AS (
         AND function_metadata.prorettype = expected.return_type
         AND function_metadata.prosecdef
         AND function_metadata.proowner = roles.postgres_oid
-        AND function_metadata.proconfig = ARRAY['search_path=']::text[]
+        AND function_metadata.proconfig IN (ARRAY['search_path=']::text[], ARRAY['search_path=""']::text[])
         AND NOT pg_catalog.has_function_privilege(roles.anon_oid, function_metadata.oid, 'EXECUTE') AS passed
     FROM expected
     CROSS JOIN roles

@@ -990,14 +990,14 @@ TO authenticated;
 CREATE OR REPLACE FUNCTION public.open_furnishing_request(
     request_id pg_catalog.uuid
 )
-RETURNS pg_catalog.boolean
+RETURNS pg_catalog.bool
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
 AS $function$
 DECLARE
-    affected_rows pg_catalog.integer;
+    affected_rows pg_catalog.int4;
 BEGIN
     UPDATE "public".furnishing_request AS request_row
     SET lifecycle_state = 'open'
@@ -1027,14 +1027,14 @@ TO authenticated, service_role;
 CREATE OR REPLACE FUNCTION public.withdraw_furnishing_request(
     request_id pg_catalog.uuid
 )
-RETURNS pg_catalog.boolean
+RETURNS pg_catalog.bool
 LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
 AS $function$
 DECLARE
-    affected_rows pg_catalog.integer;
+    affected_rows pg_catalog.int4;
 BEGIN
     UPDATE "public".furnishing_request AS request_row
     SET lifecycle_state = 'withdrawn'
@@ -1104,8 +1104,8 @@ BEGIN
           AND function_metadata.proowner = postgres_role_oid
           AND function_metadata.provolatile = 's'::pg_catalog."char"
           AND function_metadata.prosecdef
-          AND function_metadata.proconfig =
-              ARRAY['search_path=']::text[]
+          AND function_metadata.proconfig IN
+              (ARRAY['search_path=']::text[], ARRAY['search_path=""']::text[])
           AND lower(function_metadata.prosrc)
               LIKE '%public.customer_profile%'
           AND lower(function_metadata.prosrc) LIKE '%auth.uid()%'
@@ -1379,7 +1379,7 @@ BEGIN
             FROM pg_catalog.pg_proc AS function_metadata
             WHERE function_metadata.oid = transition_oid
               AND function_metadata.prorettype =
-                  'pg_catalog.boolean'::pg_catalog.regtype
+                  'pg_catalog.bool'::pg_catalog.regtype
               AND function_metadata.prolang = (
                   SELECT language.oid
                   FROM pg_catalog.pg_language AS language
@@ -1388,8 +1388,8 @@ BEGIN
               AND function_metadata.provolatile = 'v'::pg_catalog."char"
               AND function_metadata.prosecdef
               AND function_metadata.proowner = postgres_role_oid
-              AND function_metadata.proconfig =
-                  ARRAY['search_path=']::text[]
+              AND function_metadata.proconfig IN
+                  (ARRAY['search_path=']::text[], ARRAY['search_path=""']::text[])
               AND lower(function_metadata.prosrc)
                   LIKE '%"public".furnishing_request%'
               AND lower(function_metadata.prosrc)
