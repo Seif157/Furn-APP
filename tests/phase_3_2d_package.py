@@ -2345,7 +2345,7 @@ BEGIN
         JOIN pg_catalog.pg_attribute AS attribute
             ON attribute.attrelid = relation.oid
         CROSS JOIN LATERAL pg_catalog.aclexplode(
-            COALESCE(attribute.attacl, ARRAY[]::pg_catalog.aclitem[])
+            attribute.attacl
         ) AS acl
         WHERE namespace.nspname = 'public'
           AND relation.relname IN (

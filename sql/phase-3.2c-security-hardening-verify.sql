@@ -836,7 +836,7 @@ actual_acl AS (
     FROM pg_catalog.pg_attribute AS attribute
     CROSS JOIN roles
     CROSS JOIN LATERAL pg_catalog.aclexplode(
-        COALESCE(attribute.attacl, ARRAY[]::pg_catalog.aclitem[])
+        attribute.attacl
     ) AS acl
     WHERE attribute.attrelid =
           'public.furnishing_request'::pg_catalog.regclass
@@ -1150,10 +1150,7 @@ WITH unexpected_privileges AS (
        AND attribute.attnum > 0
        AND NOT attribute.attisdropped
     CROSS JOIN LATERAL pg_catalog.aclexplode(
-        COALESCE(
-            attribute.attacl,
-            ARRAY[]::pg_catalog.aclitem[]
-        )
+        attribute.attacl
     ) AS acl
     WHERE namespace.nspname = 'public'
       AND relation.relname = 'review'

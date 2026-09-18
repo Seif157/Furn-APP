@@ -44,15 +44,18 @@ PRESERVED_DIGESTS = {
     # migration failed with 42704: pg_catalog.boolean and pg_catalog.integer
     # are not type names (bool and int4 are), and an empty search_path is
     # stored as search_path="" so exact matches on 'search_path=' now accept
-    # both spellings, as the applied 3.2B package does.
+    # both spellings, as the applied 3.2B package does. And once more when the
+    # next run reached the postflight: aclexplode(COALESCE(attacl, ARRAY[]))
+    # fails with 22023 because ARRAY[] is zero-dimensional; aclexplode(attacl)
+    # means the same and works.
     SQL_DIR / "phase-3.2c-security-hardening.sql": (
-        "a73f59a24fb7f48c8207a9a951d627f9aa7576b83bb8a8fefe5fb0f4c886156c"
+        "8b04c44d19dcd2083e96f90321f5685758736295801be4a012cd9778b3736a1b"
     ),
     SQL_DIR / "phase-3.2c-security-hardening-preflight.sql": (
         "97054ae7eb8d57df6798915166db71853b2092ecedd5bfbceae25f27a9c6f02c"
     ),
     SQL_DIR / "phase-3.2c-security-hardening-verify.sql": (
-        "2a5fb642ca92a8c8da1ff32be5fb51e63b3ed5c2bab3d2fd3f39b23c212b2e6d"
+        "384966e66f108141fd33c63508aac6833b19491b57f52985ad6728add57b673f"
     ),
     SQL_DIR / "phase-3.2c-rls-policy-audit.sql": (
         "3e3d0f36e3482877bc02c8ead12ea2ceda402c9838966e45b1324b4bed1e3e98"

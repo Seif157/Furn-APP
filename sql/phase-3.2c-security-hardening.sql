@@ -1579,10 +1579,7 @@ BEGIN
                 acl.is_grantable
             FROM pg_catalog.pg_attribute AS attribute
             CROSS JOIN LATERAL pg_catalog.aclexplode(
-                COALESCE(
-                    attribute.attacl,
-                    ARRAY[]::pg_catalog.aclitem[]
-                )
+                attribute.attacl
             ) AS acl
             WHERE attribute.attrelid =
                   'public.furnishing_request'::pg_catalog.regclass

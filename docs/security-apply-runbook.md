@@ -176,6 +176,16 @@ sections passed. Until then, CLAUDE.md keeps reporting it as not executed.
   A read-only query also confirmed the helper's current grantees are only
   PUBLIC, postgres, anon, authenticated and service_role, all covered by the
   migration's REVOKE.
+- 3.2C migration, second live run: every change executed, then the
+  postflight stopped with `22023 ACL arrays must be one-dimensional` and the
+  whole transaction rolled back. Bug 6:
+  `aclexplode(COALESCE(attribute.attacl, ARRAY[]::pg_catalog.aclitem[]))`
+  hands aclexplode a zero-dimensional array for any column without its own
+  grants. `aclexplode(attribute.attacl)` means the same (it is STRICT, so a
+  NULL list gives no rows). Fixed in the migration, the verification file
+  (two places) and the 3.2D generator. The migration's granted columns were
+  also checked mechanically against the postflight's expected columns: 10
+  for INSERT and 9 for UPDATE, identical.
 - The snapshot shows that before 3.2C, anon and authenticated held INSERT,
   UPDATE, DELETE, TRUNCATE, TRIGGER, REFERENCES and MAINTAIN on the
   `order_financial_position` view. 3.2C removes them; the undo would restore

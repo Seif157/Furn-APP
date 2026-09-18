@@ -77,7 +77,28 @@ def test_an_empty_search_path_is_matched_in_both_stored_spellings(path: Path) ->
     assert exact_only == []
 
 
+# aclexplode rejects a zero-dimensional array with 22023 "ACL arrays must be
+# one-dimensional", and ARRAY[] is zero-dimensional. It is STRICT, so a NULL
+# list already yields no rows. This form stopped the first live run of the
+# 3.2C migration in its postflight. 3.2B concatenates with acldefault() first,
+# which is safe, and does not match.
+STANDALONE_EMPTY_ACL = re.compile(
+    r"aclexplode\(\s*COALESCE\(\s*[a-z_.]+\s*,\s*"
+    r"ARRAY\[\]::(?:pg_catalog\.)?aclitem\[\]\s*\)\s*\)"
+)
+
+
+@pytest.mark.parametrize("path", SECURITY_SQL, ids=lambda path: path.name)
+def test_aclexplode_is_never_given_a_standalone_empty_array(path: Path) -> None:
+    assert STANDALONE_EMPTY_ACL.findall(path.read_text(encoding="utf-8")) == []
+
+
 def test_the_check_would_catch_the_original_bug() -> None:
+    assert STANDALONE_EMPTY_ACL.search(
+        "pg_catalog.aclexplode(\n    COALESCE(attribute.attacl, "
+        "ARRAY[]::pg_catalog.aclitem[])\n) AS acl"
+    )
+    assert not STANDALONE_EMPTY_ACL.search("pg_catalog.aclexplode(attribute.attacl)")
     assert KEYWORD_ONLY_TYPE.findall("RETURNS pg_catalog.boolean")
     assert KEYWORD_ONLY_TYPE.findall("affected_rows pg_catalog.integer;")
     assert not KEYWORD_ONLY_TYPE.findall("RETURNS pg_catalog.bool")
