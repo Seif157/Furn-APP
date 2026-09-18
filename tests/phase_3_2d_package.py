@@ -730,13 +730,28 @@ def replaced_policy_values() -> str:
     return ",\n".join(lines)
 
 
+def _role_array(roles: str) -> str:
+    """'anon,authenticated' -> ARRAY['anon', 'authenticated']::name[].
+
+    The recorded roles are a comma-separated list. Writing them as a single
+    element made a role literally named "anon,authenticated", and the live 3.2D
+    postflight rejected the correct policy (found 2026-09-18 by a dry run).
+    """
+
+    return (
+        "ARRAY["
+        + ", ".join(sql_literal(role.strip()) for role in roles.split(","))
+        + "]::name[]"
+    )
+
+
 def policy_inventory_values() -> str:
     return ",\n".join(
         "                ("
         f"{sql_literal(table)}::name, {sql_literal(policy)}::name, "
         f"{sql_literal(cmd)}::text, {sql_literal(mode)}::text, "
-        f"ARRAY[{sql_literal(role)}]::name[])"
-        for table, policy, cmd, mode, role in expected_policy_inventory()
+        f"{_role_array(roles)})"
+        for table, policy, cmd, mode, roles in expected_policy_inventory()
     )
 
 

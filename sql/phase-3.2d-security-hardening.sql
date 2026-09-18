@@ -2354,7 +2354,7 @@ BEGIN
                 ('marketplace_party'::name, 'marketplace_party_insert_own'::name, 'INSERT'::text, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
                 ('marketplace_party'::name, 'marketplace_party_select_admin'::name, 'SELECT'::text, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
                 ('marketplace_party'::name, 'marketplace_party_select_own'::name, 'SELECT'::text, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
-                ('marketplace_party'::name, 'marketplace_party_select_public'::name, 'SELECT'::text, 'PERMISSIVE'::text, ARRAY['anon,authenticated']::name[]),
+                ('marketplace_party'::name, 'marketplace_party_select_public'::name, 'SELECT'::text, 'PERMISSIVE'::text, ARRAY['anon', 'authenticated']::name[]),
                 ('marketplace_party'::name, 'marketplace_party_update_own'::name, 'UPDATE'::text, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
                 ('offer_line_item'::name, 'offer_line_item_select'::name, 'SELECT'::text, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),
                 ('offer_line_item'::name, 'offer_line_item_select_admin'::name, 'SELECT'::text, 'PERMISSIVE'::text, ARRAY['authenticated']::name[]),

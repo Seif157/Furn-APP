@@ -134,7 +134,20 @@ def test_narrowed_files_normalize_policy_text_before_exact_comparison(
     assert RAW_POLICY_TEXT_COMPARED.findall(text) == []
 
 
+# A role array written as one element holding a comma makes a role literally
+# named "anon,authenticated"; the live 3.2D postflight rejected the correct
+# policy on it (2026-09-18).
+COMMA_IN_ONE_ROLE = re.compile(r"ARRAY\['[^']*,[^']*'\]::name\[\]")
+
+
+@pytest.mark.parametrize("path", SECURITY_SQL, ids=lambda path: path.name)
+def test_no_role_array_element_contains_a_comma(path: Path) -> None:
+    assert COMMA_IN_ONE_ROLE.findall(path.read_text(encoding="utf-8")) == []
+
+
 def test_the_check_would_catch_the_original_bug() -> None:
+    assert COMMA_IN_ONE_ROLE.search("ARRAY['anon,authenticated']::name[]")
+    assert not COMMA_IN_ONE_ROLE.search("ARRAY['anon', 'authenticated']::name[]")
     assert RAW_POLICY_TEXT_COMPARED.search(
         "OR pg_catalog.regexp_replace(\n  actual.qual, '\\s+', ' ', 'g')"
     )
