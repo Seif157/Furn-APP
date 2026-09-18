@@ -105,7 +105,7 @@ it without explicit authorization).
 Latest verification (2026-09-17, on the phase-4a-catalogue-audit branch):
 
 ```text
-pytest:                  575 passed
+pytest:                  660 passed
 ruff:                    passed
 format:                  passed
 git diff --check:        clean
@@ -1168,9 +1168,27 @@ AI ASSISTANT
 └── Phase 7C Assistant State
 
 VISION
-├── Phase 8A Room Image Analysis
-├── Phase 8B Image + Text Requirements
-└── Phase 8C Image-to-Catalogue Recommendation
+├── Phase 8A Room Image Analysis             NOT BUILT, by decision (see below)
+├── Phase 8B Image + Text Requirements       NOT BUILT
+├── Phase 8C Image-to-Catalogue Recommendation
+└── Room planning from text + AI preview     IMPLEMENTED LOCALLY, LIVE-VERIFIED 2026-09-18
+
+Room planning (app/rooms/) replaces photo analysis for now, at the user's
+direction on 2026-09-18: no customer photos. POST /v1/rooms/plan reads one
+sentence ("a modern living room with a sofa, 2 chairs and a table under 40k")
+into slots, and deterministic code picks one real product per slot so the whole
+room fits the budget, with enough stock in one colour for each quantity. POST
+/v1/rooms/image renders a labelled AI preview of exactly those products from
+their real photos. The model never chooses a product; the image is the only
+non-fact in the feature and is labelled everywhere. Product photos are fetched
+server-side through an HTTPS host allowlist because the URLs are
+seller-controlled. Default image model gemini-2.5-flash-image (14.5 s against 29
+s for nano-banana-pro-preview at comparable fidelity). Design, measurements and
+known limits: docs/phase-8-room-planning.md.
+
+Photo analysis was probed on 2026-09-18 and works, but gemini-2.5-flash-image
+deleted existing furniture when editing a customer's room photo, and customer
+photos raise a privacy obligation. Revisit after the security review.
 
 OPTIMIZATION
 ├── Phase 9A Arabic / English Normalization

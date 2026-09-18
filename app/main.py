@@ -13,6 +13,8 @@ from app.auth.gateway import SupabaseAuthGateway
 from app.catalog.gateway import SupabaseCatalogueGateway
 from app.catalog.router import router as catalogue_router
 from app.config import load_ai_settings, load_settings
+from app.rooms.images import ReferenceImageFetcher
+from app.rooms.router import router as rooms_router
 from app.routers.users import router as users_router
 from app.search.router import router as search_router
 
@@ -50,6 +52,13 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             client=client,
             settings=ai_settings,
         )
+        # Product photos may be fetched only from the Supabase project itself
+        # and the hosts explicitly configured; see ReferenceImageFetcher.
+        supabase_host = (settings.supabase_url.host or "").lower()
+        application.state.reference_fetcher = ReferenceImageFetcher(
+            client=client,
+            allowed_hosts=ai_settings.reference_hosts | {supabase_host},
+        )
         yield
 
 
@@ -74,3 +83,4 @@ async def get_health() -> HealthResponse:
 app.include_router(users_router)
 app.include_router(catalogue_router)
 app.include_router(search_router)
+app.include_router(rooms_router)

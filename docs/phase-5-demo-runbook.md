@@ -72,6 +72,25 @@ so they look worse than the system is.
 | محتاج دولاب أبيض كبير | The colour applies; "كبير" does not, because no size was stated in numbers. A child's wardrobe ranks first |
 | I need a turquoise coffee table | Coffee tables are not stocked. The word is now reported in `unresolved`, but the response still lists the catalogue unless the client acts on that |
 
+## Room planning
+
+Plan, then preview. The plan answers in about three seconds; the preview image
+takes ten to twenty, so show the plan first and let the image arrive after.
+Always state a style: without one, a room can mix styles.
+
+| Say this | What it shows |
+|---|---|
+| عايز أوضة معيشة مودرن فيها كنبة و2 كرسي وترابيزة في حدود 40 ألف | A coherent modern room, 24,330 of 40,000, with the colour to order for each piece |
+| a scandinavian living room with a sofa, two chairs and a table under 30000 | The same in English, all Scandinavian |
+| عايز كنبة و4 كراسي بـ 10 آلاف | Cannot be done for 10,000, and says so: the cheapest room is 8,700 over |
+
+The preview is labelled "معاينة بالذكاء الاصطناعي" and carries a disclaimer.
+Leave both visible. It is generated, and it can drift, including drawing one
+chair where two were planned; the plan's list is what the customer buys.
+
+Avoid asking for five of anything: no chair has five in stock in one colour, so
+that piece comes back unfilled. Avoid "coffee table": it is not stocked.
+
 ## If something fails mid-demo
 
 | Symptom | Meaning |

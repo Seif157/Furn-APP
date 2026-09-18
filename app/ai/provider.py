@@ -13,7 +13,8 @@ inherits the existing guardrails instead of reimplementing them.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 
@@ -42,8 +43,31 @@ class AIResponseInvalidError(AIProviderError):
     """
 
 
+@dataclass(frozen=True, slots=True)
+class ImageBytes:
+    """An image in transit: raw bytes and their declared media type."""
+
+    mime_type: str
+    data: bytes
+
+
 class AIProvider(Protocol):
     """The only interface the rest of the backend may depend on."""
+
+    async def generate_image(
+        self,
+        *,
+        prompt: str,
+        references: Sequence[ImageBytes],
+    ) -> ImageBytes:
+        """Render one image from a text prompt and reference photographs.
+
+        ``prompt`` is backend-built text. ``references`` are photographs of
+        real catalogue products the image must depict. Implementations raise
+        ``AIProviderUnavailableError`` or ``AIResponseInvalidError`` and never
+        return a partial or empty image.
+        """
+        ...
 
     async def generate_json(
         self,

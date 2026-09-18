@@ -11,6 +11,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict, SettingsError
 # retirement, and Google's own error names gemini-3.6-flash as the replacement.
 DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
 DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
+# Measured on 2026-09-18 rendering a planned room from three real product
+# photos: this model and nano-banana-pro-preview both reproduced every product
+# and the right counts, but this one took 14.5 s against 29 s and is a stable
+# release rather than a preview. It did delete existing furniture when asked to
+# edit a customer's own room photo, which is why room photos are not accepted.
+DEFAULT_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
+HOSTNAME_PATTERN = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9-]{1,63})+")
 # The model name is interpolated into the request path, and the API key into a
 # request header. Both alphabets are deliberately narrow so neither value can
 # introduce a path segment, a query string, or a header separator.
@@ -103,11 +110,48 @@ class AISettings(BaseSettings):
     tuning it.
     """
 
+    gemini_image_model: str = Field(
+        default=DEFAULT_GEMINI_IMAGE_MODEL, validation_alias="GEMINI_IMAGE_MODEL"
+    )
+    """Model that renders room previews. Separate because image generation is a
+    different model family with different cost and latency."""
+    gemini_image_timeout_seconds: Annotated[float, Field(gt=0, le=180)] = Field(
+        default=90.0, validation_alias="GEMINI_IMAGE_TIMEOUT_SECONDS"
+    )
+    """Measured on 2026-09-18 at 10 to 19 seconds per image, so far above the
+    text timeout."""
+    image_reference_hosts: str = Field(
+        default="images.unsplash.com", validation_alias="IMAGE_REFERENCE_HOSTS"
+    )
+    """Comma-separated hosts the server may fetch product photos from.
+
+    Rendering a room preview means fetching each product's photo server-side,
+    and those URLs are seller-controlled catalogue data. Without an allowlist a
+    seller could point an image at an internal address and have this server
+    request it. The Supabase project host is always allowed in addition.
+    """
+
     @property
     def gemini_enabled(self) -> bool:
         """Whether a key is present, which is the only switch for the AI path."""
 
         return self.gemini_api_key is not None
+
+    @property
+    def reference_hosts(self) -> frozenset[str]:
+        return frozenset(
+            host.strip().lower()
+            for host in self.image_reference_hosts.split(",")
+            if host.strip()
+        )
+
+    @field_validator("image_reference_hosts")
+    @classmethod
+    def require_plain_hostnames(cls, value: str) -> str:
+        for host in (part.strip() for part in value.split(",")):
+            if host and HOSTNAME_PATTERN.fullmatch(host.lower()) is None:
+                raise ValueError("IMAGE_REFERENCE_HOSTS is malformed")
+        return value
 
     @field_validator("gemini_api_key")
     @classmethod
@@ -120,7 +164,7 @@ class AISettings(BaseSettings):
             raise ValueError("GEMINI_API_KEY is malformed")
         return value
 
-    @field_validator("gemini_model")
+    @field_validator("gemini_model", "gemini_image_model")
     @classmethod
     def require_path_safe_model(cls, value: str) -> str:
         """Keep the model name a single, literal URL path segment."""

@@ -209,6 +209,14 @@ CATEGORIES = Vocabulary(
                 "ترابيزة سفرة",
                 "طاولة طعام",
                 "dining room table",
+                # A bare "table" resolves here because dining tables are the
+                # only tables this catalogue sells. "coffee table" is a
+                # different whole surface and stays unresolved, since that is
+                # a table the catalogue does not carry.
+                "table",
+                "طاولة",
+                "ترابيزة",
+                "تربيزة",
             ),
             True,
         ),

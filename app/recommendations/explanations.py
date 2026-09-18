@@ -40,6 +40,12 @@ def _money(value: Decimal, language: Language) -> str:
     return f"{_number(value)} {CURRENCY[response_language(language)]}"
 
 
+def format_money(value: Decimal, language: Language) -> str:
+    """Public form of the money formatting every grounded sentence uses."""
+
+    return _money(value, language)
+
+
 def _observed_decimal(check: ConstraintCheck) -> Decimal | None:
     if check.observed is None:
         return None

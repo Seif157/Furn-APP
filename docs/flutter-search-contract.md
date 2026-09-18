@@ -333,3 +333,199 @@ Directionality(
 
 `firstOrNull` comes from `package:collection`, or replace it with
 `.isEmpty ? null : ....first`.
+
+---
+
+# Room planning
+
+Two calls. The plan comes first and is what the customer acts on. The preview is
+optional decoration that loads after it. Never block the plan on the image.
+
+## 1. Plan the room
+
+```http
+POST /v1/rooms/plan
+Authorization: Bearer <supabase access token>
+Content-Type: application/json
+
+{"query": "عايز أوضة معيشة مودرن فيها كنبة و2 كرسي وترابيزة في حدود 40 ألف"}
+```
+
+About three seconds. The response, trimmed:
+
+```json
+{
+  "language": "ar",
+  "items": [
+    {
+      "requested": {"slug": "sofas", "label": "كنب"},
+      "product": { "...the same ProductResponse as search and the catalogue..." },
+      "quantity": 1,
+      "unit_price": "13500",
+      "line_total": "13500",
+      "colour": "رمادي — grey",
+      "reasons": [{"code": "category", "text": "كنب"}, {"code": "in_stock", "text": "متوفر"}]
+    }
+  ],
+  "total": "24330",
+  "budget": "40000",
+  "within_budget": true,
+  "remaining": "15670",
+  "over_budget_by": null,
+  "summary": "4 قطع بإجمالي 24,330 جنيه، في حدود ميزانيتك 40,000 جنيه",
+  "unfilled": [],
+  "unresolved": [],
+  "clarification": null,
+  "image_request": { "items": [{"product_id": "...", "quantity": 1, "colour_id": "..."}],
+                     "room_type": "living room", "styles": ["modern"], "language": "ar" }
+}
+```
+
+The same two rules as search apply. Every decimal is a JSON string, and
+`unit_price` is already what the customer pays, discount included.
+
+- `colour` is the catalogue colour to order. It was chosen because it has
+  enough stock for the whole quantity.
+- `summary` is one ready-made sentence in the customer's language. Show it.
+- `unfilled` lists pieces that could not be supplied, each with a localized
+  `text` such as "الكمية المطلوبة مش متوفرة بلون واحد".
+- `within_budget: false` still returns a full room, the cheapest possible, and
+  `over_budget_by` says by how much. The `summary` already says so in words.
+- `clarification` is set, and `items` empty, when the sentence named no
+  furniture at all.
+
+## 2. Render the preview
+
+Send `image_request` from the plan back unchanged:
+
+```http
+POST /v1/rooms/image
+Authorization: Bearer <supabase access token>
+Content-Type: application/json
+
+<the plan's image_request object>
+```
+
+Ten to twenty seconds. Show a placeholder while it loads.
+
+```json
+{
+  "image_base64": "iVBORw0KGgo...",
+  "mime_type": "image/png",
+  "label": "معاينة بالذكاء الاصطناعي",
+  "disclaimer": "صورة توضيحية متولدة من صور المنتجات...",
+  "items": [...],
+  "references_used": 3
+}
+```
+
+**Show `label` on the image and `disclaimer` beneath it. Both are required.**
+The image is generated and can differ from the real products, sometimes in
+counts. The plan's product list is what the customer buys. Never use this image
+as a product photo.
+
+`image_request` is null when the plan has no items; hide the preview then.
+
+## Errors
+
+Same codes as search. Two additions for the image call:
+
+| Status | Code | Meaning |
+|---|---|---|
+| 404 | `product_not_found` | A product is no longer for sale. Re-plan |
+| 502 | `search_upstream_error` | The model declined to draw it. Hide the preview, keep the plan |
+
+## Dart
+
+Uses `_decimal` and `SearchProduct` from the search client above.
+
+```dart
+class RoomItem {
+  RoomItem(this.product, this.quantity, this.unitPrice, this.lineTotal, this.colour);
+  final SearchProduct product;
+  final int quantity;
+  final double unitPrice;   // already the payable price
+  final double lineTotal;
+  final String colour;
+  factory RoomItem.fromJson(Map<String, dynamic> j) => RoomItem(
+        SearchProduct.fromJson(j['product'] as Map<String, dynamic>),
+        j['quantity'] as int,
+        _decimal(j['unit_price'])!,
+        _decimal(j['line_total'])!,
+        j['colour'] as String,
+      );
+}
+
+class RoomPlan {
+  RoomPlan(this.raw);
+  final Map<String, dynamic> raw;
+  List<RoomItem> get items => (raw['items'] as List)
+      .cast<Map<String, dynamic>>()
+      .map(RoomItem.fromJson)
+      .toList();
+  double get total => _decimal(raw['total'])!;
+  bool get withinBudget => raw['within_budget'] as bool;
+  String get summary => raw['summary'] as String;
+  String? get clarification => raw['clarification'] as String?;
+  bool get isArabic => raw['language'] == 'ar';
+  Map<String, dynamic>? get imageRequest =>
+      raw['image_request'] as Map<String, dynamic>?;
+}
+
+class RoomPreview {
+  RoomPreview(this.bytes, this.label, this.disclaimer);
+  final Uint8List bytes;      // Image.memory(bytes)
+  final String label;         // overlay on the image
+  final String disclaimer;    // under the image
+}
+
+extension RoomApi on SearchApi {
+  Future<RoomPlan> planRoom(String query, {required String accessToken}) async {
+    final r = await _client
+        .post(Uri.parse('$baseUrl/v1/rooms/plan'),
+            headers: {
+              'Authorization': 'Bearer $accessToken',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({'query': query}))
+        .timeout(const Duration(seconds: 45));
+    final body = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+    if (r.statusCode != 200) throw _error(body, r.statusCode);
+    return RoomPlan(body);
+  }
+
+  Future<RoomPreview> renderRoom(RoomPlan plan, {required String accessToken}) async {
+    final r = await _client
+        .post(Uri.parse('$baseUrl/v1/rooms/image'),
+            headers: {
+              'Authorization': 'Bearer $accessToken',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode(plan.imageRequest))
+        // Rendering takes 10 to 20 seconds; allow well past that.
+        .timeout(const Duration(seconds: 120));
+    final body = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+    if (r.statusCode != 200) throw _error(body, r.statusCode);
+    return RoomPreview(
+      base64Decode(body['image_base64'] as String),
+      body['label'] as String,
+      body['disclaimer'] as String,
+    );
+  }
+
+  SearchException _error(Map<String, dynamic> body, int status) {
+    final d = body['detail'];
+    return d is Map<String, dynamic>
+        ? SearchException(d['code'] as String, d['message'] as String, status)
+        : SearchException('invalid_request', 'Invalid request.', status);
+  }
+}
+```
+
+`_client` and `baseUrl` are the fields of `SearchApi` above; if the extension
+cannot see them in your file layout, move these two methods into `SearchApi`.
+`Uint8List` needs `import 'dart:typed_data';`.
+
+Typical screen flow: call `planRoom`, render the plan immediately, then if
+`plan.imageRequest != null` call `renderRoom` and fade the preview in when it
+arrives. If `renderRoom` throws, hide the preview and keep the plan.
