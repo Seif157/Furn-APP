@@ -1,8 +1,8 @@
 # Phase 5C — the natural-language search endpoint
 
 Status: **Implemented locally and driven end to end against the live Gemini API
-on 2026-09-17, with the seed catalogue standing in for Supabase.** Not yet run
-against a real Supabase session.
+on 2026-09-17, with the seed catalogue standing in for Supabase, and passed
+with a real signed-in Supabase session on 2026-09-18.**
 
 ```http
 POST /v1/search

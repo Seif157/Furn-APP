@@ -125,8 +125,7 @@ Phase 3.2C migration:    NOT EXECUTED
 Phase 3.2D migration:    NOT EXECUTED (requires 3.2C applied first)
 Live acceptance:         NOT EXECUTED
 Approval:                HUMAN SECURITY REVIEW REQUIRED (both packages)
-Search with a real user session:  NOT YET EXERCISED; run
-                                  scripts/live_search_smoke.py from PowerShell
+Search with a real user session:  PASSED 2026-09-18 (scripts/live_search_smoke.py)
 ```
 
 Starting the API: `uv run python -m scripts.serve`. Not `uv run uvicorn`, which
@@ -572,7 +571,9 @@ Then the backend searches real catalogue data.
 
 Status: **Implemented locally and driven end to end against the live Gemini
 API on 2026-09-17. Parser in app/ai/ (Phase 5A), endpoint POST /v1/search
-(Phase 5C). Not yet run against a real Supabase session.**
+(Phase 5C). Passed with a real signed-in Supabase session on 2026-09-18:
+Arabic and English searches, discount pricing, and nearest alternatives all
+returned correctly through the real auth check and row-level security.**
 
 ### 6.2 Requirement Extraction
 
