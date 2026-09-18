@@ -21,3 +21,7 @@ htmlcov/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Room preview written by scripts/live_search_smoke.py --render
+room-preview.png
+room-preview.jpg

@@ -7,21 +7,26 @@ real startup, the real Supabase Auth check, the catalogue read under that
 user's row-level security, and the real Gemini provider. The only thing
 missing compared with the running server is the network socket.
 
-    uv run python -m scripts.live_search_smoke
+    uv run python -m scripts.live_search_smoke            # search + room plan
+    uv run python -m scripts.live_search_smoke --render   # also the preview image
 
 It asks for an email and a password in your terminal. The password is read
 without echo, and neither it nor the session token is ever printed, logged, or
 written anywhere. Typing them in is the authorization; nothing runs without it.
-It spends three Gemini calls and writes nothing.
+It spends four Gemini calls, five with --render, and writes nothing
+except the preview image when asked for one.
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import base64
 import getpass
 import logging
 import sys
 import warnings
+from pathlib import Path
 from typing import NoReturn
 
 import httpx
@@ -30,6 +35,7 @@ from app.config import load_settings
 from app.main import app
 from scripts.live_catalog_smoke import SmokeFailure, sign_in
 
+ROOM_SENTENCE = "عايز أوضة معيشة مودرن فيها كنبة و2 كرسي وترابيزة في حدود 40 ألف"
 SENTENCES = (
     "عايز كنبة مودرن بيج أقل من ٣٠ ألف",
     "a beech wood bed under 20000",
@@ -95,7 +101,7 @@ def show_search(sentence: str, response: httpx.Response) -> bool:
     return True
 
 
-async def run() -> int:
+async def run(*, render: bool, skip_rooms: bool) -> int:
     try:
         settings = load_settings()
     except RuntimeError:
@@ -146,15 +152,71 @@ async def run() -> int:
                     )
                     ok = show_search(sentence, response) and ok
 
+            if ok and not skip_rooms:
+                ok = await check_room(client, headers, render=render) and ok
+
     del headers
     del session
-    print("\nPASSED: search works with a real signed-in session." if ok else "\nFAILED")
+    print(
+        "\nPASSED: search and room planning work with a real signed-in session."
+        if ok
+        else "\nFAILED"
+    )
     return 0 if ok else 1
 
 
+async def check_room(
+    client: httpx.AsyncClient, headers: dict[str, str], *, render: bool
+) -> bool:
+    print(f"\n{ROOM_SENTENCE}")
+    response = await client.post(
+        "/v1/rooms/plan", json={"query": ROOM_SENTENCE}, headers=headers
+    )
+    if response.status_code != 200:
+        print(f"  FAILED  room plan HTTP {response.status_code}")
+        return False
+    plan = response.json()
+    print(f"  ok  {plan['summary']}")
+    for item in plan["items"]:
+        print(
+            f"    {item['quantity']} x {item['product']['name']}  "
+            f"{item['line_total']}  ({item['colour']})"
+        )
+    if not render or not plan["image_request"]:
+        return True
+
+    print("  rendering the preview, 10 to 20 seconds...")
+    image = await client.post(
+        "/v1/rooms/image", json=plan["image_request"], headers=headers
+    )
+    if image.status_code != 200:
+        print(f"  FAILED  room preview HTTP {image.status_code}")
+        return False
+    payload = image.json()
+    path = Path(
+        "room-preview.png" if "png" in payload["mime_type"] else "room-preview.jpg"
+    )
+    path.write_bytes(base64.b64decode(payload["image_base64"]))
+    print(
+        f"  ok  preview saved to {path.resolve()} "
+        f"({payload['references_used']} product photos used)"
+    )
+    return True
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--render",
+        action="store_true",
+        help="Also render the room preview image (one image-model call).",
+    )
+    parser.add_argument("--skip-rooms", action="store_true", help="Check search only.")
+    arguments = parser.parse_args()
     try:
-        return asyncio.run(run())
+        return asyncio.run(
+            run(render=arguments.render, skip_rooms=arguments.skip_rooms)
+        )
     except KeyboardInterrupt:
         return 130
 
