@@ -156,3 +156,15 @@ sections passed. Until then, CLAUDE.md keeps reporting it as not executed.
 - 3.2C preflight after the fixes: **Success. No rows returned.** Nothing
   changed.
 - The byte pins on the two 3.2C files were updated with the user's approval.
+- Free plan, so no restorable backup. Instead a read-only snapshot query
+  captured the live definitions of everything 3.2C changes (the customer
+  profile helper, four policies, grants on `review`, `furnishing_request` and
+  `order_financial_position`) and produced
+  `rollback/phase-3.2c-undo-2026-09-18.sql`. It reverses 3.2C exactly and
+  touches no data rows. It lives outside `sql/` because only reviewed
+  migrations may contain DDL there. Run it in the SQL Editor only if 3.2C must
+  be reversed.
+- The snapshot shows that before 3.2C, anon and authenticated held INSERT,
+  UPDATE, DELETE, TRUNCATE, TRIGGER, REFERENCES and MAINTAIN on the
+  `order_financial_position` view. 3.2C removes them; the undo would restore
+  them, because its job is exact restoration.
