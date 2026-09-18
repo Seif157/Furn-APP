@@ -740,3 +740,45 @@ extension CompareApi on SearchApi {
 Like the room methods, these use `_client`, `baseUrl`, `_error`, `_decimal`
 and `SearchProduct` from the clients above; if your file layout hides private
 members, move these methods into `SearchApi`.
+
+
+# Reviews: switch before the 3.2C security migration
+
+After Phase 3.2C is applied, a signed-in user can read only **their own**
+reviews directly from Supabase. Any screen that lists a product's or a
+seller's reviews by querying the `review` table with the user's session will
+come back empty. Switch those screens to this endpoint first; it works both
+before and after the migration.
+
+```http
+GET /v1/reviews/public?product_id=<uuid>&limit=20&offset=0
+GET /v1/reviews/public?seller_id=<uuid>
+```
+
+No sign-in needed. Exactly one of `product_id` or `seller_id` (otherwise 422
+`invalid_review_target`). `limit` 1 to 50, newest first.
+
+```json
+{
+  "items": [
+    {
+      "id": "…",
+      "target_kind": "product",
+      "product_id": "…",
+      "seller_id": null,
+      "rating": 4,
+      "comment": "مريحة جدا",
+      "created_at": "2026-09-10T12:00:00Z"
+    }
+  ],
+  "limit": 20,
+  "offset": 0,
+  "has_more": false
+}
+```
+
+Nothing identifies the reviewer: no customer id, no name. Errors: 503
+`reviews_unavailable` (retry), 502 `reviews_upstream_error`.
+
+A customer's own reviews (for example, "my reviews") can still be read directly
+with their session, as before.

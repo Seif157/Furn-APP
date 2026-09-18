@@ -17,6 +17,8 @@ from app.core.cache import AICaches
 from app.core.limits import Limit, RateLimiter
 from app.core.observability import RequestLogMiddleware, configure_logging
 from app.recommendations.router import router as recommendations_router
+from app.reviews.gateway import SupabaseReviewGateway
+from app.reviews.router import router as reviews_router
 from app.rooms.images import ReferenceImageFetcher
 from app.rooms.router import router as rooms_router
 from app.routers.users import router as users_router
@@ -71,6 +73,10 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             client=client,
             settings=settings,
         )
+        application.state.review_gateway = SupabaseReviewGateway(
+            client=client,
+            settings=settings,
+        )
         application.state.ai_provider = build_gemini_provider(
             client=client,
             settings=ai_settings,
@@ -109,3 +115,4 @@ app.include_router(catalogue_router)
 app.include_router(search_router)
 app.include_router(rooms_router)
 app.include_router(recommendations_router)
+app.include_router(reviews_router)

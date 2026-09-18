@@ -291,6 +291,7 @@ LIFESPAN_STATE = (
     "catalogue_gateway",
     "ai_provider",
     "reference_fetcher",
+    "review_gateway",
     "rate_limiter",
     "ai_caches",
 )

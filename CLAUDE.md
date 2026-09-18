@@ -133,6 +133,14 @@ Approval:                HUMAN SECURITY REVIEW REQUIRED (both packages)
 Search with a real user session:  PASSED 2026-09-18 (scripts/live_search_smoke.py)
 ```
 
+On 2026-09-18 the user decided to apply 3.2B and 3.2C directly to the live
+project, skipping the testing-branch step. The user runs each file in the
+Supabase SQL Editor; the step-by-step order, stop conditions and smoke tests
+are in docs/security-apply-runbook.md. 3.2D is held until the backend has a
+cart endpoint and Flutter uses the order and service-request functions. The
+table above changes only when a package's verification sections are reported
+passing.
+
 Starting the API: `uv run python -m scripts.serve`. Not `uv run uvicorn`, which
 Windows Application Control blocks on this machine (os error 4551).
 
