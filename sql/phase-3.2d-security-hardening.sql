@@ -2935,8 +2935,15 @@ BEGIN
            OR function_metadata.proowner <> postgres_role_oid
            OR coalesce(function_metadata.proconfig NOT IN (ARRAY['search_path=']::text[], ARRAY['search_path=""']::text[]), true)
            OR lower(function_metadata.prosrc) NOT LIKE '%auth.uid()%'
+           -- advance_purchase_order lists its allowed (from, to) pairs rather
+           -- than testing one state, so it is checked for its first pair.
            OR lower(function_metadata.prosrc) NOT LIKE
-                  '%lifecycle_state::text = ''' || expected.old_state || '''%'
+                  CASE
+                      WHEN expected.signature LIKE 'public.advance\_purchase\_order(%'
+                      THEN '%(''' || expected.old_state || ''', '''
+                           || expected.new_state || ''')%'
+                      ELSE '%lifecycle_state::text = ''' || expected.old_state || '''%'
+                  END
            OR lower(function_metadata.prosrc) NOT LIKE '%''' || expected.new_state || '''%'
            OR lower(function_metadata.prosrc) LIKE '%or true%'
            OR lower(function_metadata.prosrc) NOT LIKE '%get diagnostics affected_rows = row_count%'

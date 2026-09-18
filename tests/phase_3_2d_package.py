@@ -2404,8 +2404,15 @@ BEGIN
            OR function_metadata.proowner <> postgres_role_oid
            OR coalesce(function_metadata.proconfig NOT IN (ARRAY['search_path=']::text[], ARRAY['search_path=""']::text[]), true)
            OR lower(function_metadata.prosrc) NOT LIKE '%auth.uid()%'
+           -- advance_purchase_order lists its allowed (from, to) pairs rather
+           -- than testing one state, so it is checked for its first pair.
            OR lower(function_metadata.prosrc) NOT LIKE
-                  '%lifecycle_state::text = ''' || expected.old_state || '''%'
+                  CASE
+                      WHEN expected.signature LIKE 'public.advance\\_purchase\\_order(%'
+                      THEN '%(''' || expected.old_state || ''', '''
+                           || expected.new_state || ''')%'
+                      ELSE '%lifecycle_state::text = ''' || expected.old_state || '''%'
+                  END
            OR lower(function_metadata.prosrc) NOT LIKE '%''' || expected.new_state || '''%'
            OR lower(function_metadata.prosrc) LIKE '%or true%'
            OR lower(function_metadata.prosrc) NOT LIKE '%get diagnostics affected_rows = row_count%'
@@ -2856,8 +2863,13 @@ comparison AS (
         AND function_metadata.proowner = roles.postgres_oid
         AND function_metadata.proconfig IN (ARRAY['search_path=']::text[], ARRAY['search_path=""']::text[])
         AND lower(function_metadata.prosrc) LIKE '%auth.uid()%'
-        AND lower(function_metadata.prosrc)
-            LIKE '%lifecycle_state::text = ''' || expected.old_state || '''%'
+        AND lower(function_metadata.prosrc) LIKE
+            CASE
+                WHEN expected.signature LIKE 'public.advance\\_purchase\\_order(%'
+                THEN '%(''' || expected.old_state || ''', '''
+                     || expected.new_state || ''')%'
+                ELSE '%lifecycle_state::text = ''' || expected.old_state || '''%'
+            END
         AND lower(function_metadata.prosrc) LIKE '%''' || expected.new_state || '''%'
         AND lower(function_metadata.prosrc) NOT LIKE '%or true%'
         AND lower(function_metadata.prosrc) LIKE '%return affected_rows = 1%'
