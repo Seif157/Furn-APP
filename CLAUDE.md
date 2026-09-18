@@ -136,6 +136,10 @@ Approval:                3.2C applied at the user's decision without an independ
 Search with a real user session:  PASSED 2026-09-18 (scripts/live_search_smoke.py)
 Smoke test after 3.2C:   PASSED 2026-09-18 22:02 (search, follow-up, meta, public
                          reviews, similar, compare, room plan; real customer account)
+Server-side cart:        PASSED live 2026-09-18 22:54 (POST /v1/cart created
+                         customer2's cart, second call returned it, created=false)
+Supabase secret key:     in .env (git-ignored) since 2026-09-18; used ONLY by
+                         app/cart/gateway.py SupabaseCartCreator to insert a cart
 ```
 
 Applying 3.2C exposed eight bugs in the package, none in the database: six in

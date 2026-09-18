@@ -168,11 +168,13 @@ async def run(*, render: bool, skip_rooms: bool, cart: bool) -> int:
 
     del headers
     del session
+    checked = "search, follow-ups, compare, similar, public reviews"
+    if cart:
+        checked += ", the cart"
+    if not skip_rooms:
+        checked += " and room planning"
     print(
-        "\nPASSED: search, follow-ups, compare, similar, public reviews and "
-        "room planning work with a real signed-in session."
-        if ok
-        else "\nFAILED"
+        f"\nPASSED: {checked} work with a real signed-in session." if ok else "\nFAILED"
     )
     return 0 if ok else 1
 
