@@ -72,22 +72,27 @@ Phase 3.2D   Deferred-Finding Remediation          COMMITTED, PENDING HUMAN REVI
 Phase 4A-4D  AI Foundation                         COMMITTED (see section 13)
 Phase 5A     Natural-Language Parser               COMMITTED, LIVE-VERIFIED
 Phase 5C     Search Endpoint POST /v1/search       COMMITTED, LIVE-VERIFIED
+Phase 6D     Comparison + similar products         COMMITTED, VERIFIED LOCALLY
+Phase 10A/C  Request logging, rate limits, cache   COMMITTED, VERIFIED LOCALLY
 ```
 
-Branches (all pushed to origin, none merged):
+Branches: **`main` only.** On 2026-09-18, at the user's explicit request, `main`
+was fast-forwarded to the tip of the stacked branches and the three phase
+branches (`phase-3.2c-security-hardening`, `phase-3.2d-security-hardening`,
+`phase-4a-catalogue-audit`) were deleted locally and on origin. Every commit
+they held is on `main`; the history is linear, so nothing was lost.
 
-```text
-main                              b7931a0
-phase-3.2c-security-hardening     fb3e0ca  (PR target: main)
-phase-3.2d-security-hardening     78ae8c3  (stacked on 3.2C; PR target: the 3.2C branch)
-phase-4a-catalogue-audit          (tip)    (stacked on 3.2D; holds Phases 4, 5 and 6)
-```
+**Being on `main` is not approval.** The Phase 3.2C and 3.2D SQL packages now
+sit on `main` as files, still NOT EXECUTED and still pending human security
+review. Merging code and applying a migration are different acts; section 15
+still forbids the second without explicit authorization. Review now happens on
+`main` directly (or on a review branch cut from it), not through the old PR
+chain.
 
-The branch name predates its contents: `phase-4a-catalogue-audit` carries all
-of Phase 4 and Phase 5. It is stacked on the two security branches, so nothing
-in Phase 4 or 5 can reach `main` until those are reviewed and applied. Phase 4
-and 5 do not depend on the security migrations, so rebasing them onto `main` is
-clean whenever shipping matters more than branch history.
+`README.md` is still the Phase 1 text because three security tests pin it
+byte-for-byte as part of those packages. The current overview is
+`docs/getting-started.md`. Update the README only together with the pins, after
+the security review.
 
 Live catalogue state (2026-09-17): the Phase 5 seed is loaded on the project
 `.env` points at, giving 45 recommendation-eligible products, 41 seeded and 4
@@ -102,10 +107,10 @@ SQL. Decisions are recorded in `docs/phase-3.2d-decisions.md`; design in
 `scripts/live_phase_3_2d_acceptance.py` (GET and no-op PATCH only; never run
 it without explicit authorization).
 
-Latest verification (2026-09-17, on the phase-4a-catalogue-audit branch):
+Latest verification (2026-09-18, on main after the fast-forward):
 
 ```text
-pytest:                  680 passed
+pytest:                  719 passed (also in a clean copy with no .env)
 ruff:                    passed
 format:                  passed
 git diff --check:        clean
@@ -114,7 +119,7 @@ SQL parsing:             all seed and security files parse
 3.2C finding reconciliation:  122/122
 3.2D deferred reconciliation: 56/56 (20 remediated, 31 accepted, 7 false positive)
 generator == SQL on disk:     yes (both security and seed generators)
-app startup:             real lifespan boots; /health 200
+app startup:             real lifespan boots; /health 200 with X-Request-ID
 Supabase Auth leg:       reachable; a bogus token returns 401 invalid_access_token
 ```
 
@@ -130,6 +135,20 @@ Search with a real user session:  PASSED 2026-09-18 (scripts/live_search_smoke.p
 
 Starting the API: `uv run python -m scripts.serve`. Not `uv run uvicorn`, which
 Windows Application Control blocks on this machine (os error 4551).
+
+CI: `.github/workflows/ci.yml` runs pytest, ruff check, ruff format --check and
+a whitespace check on every push to `main` and every pull request, with no
+secrets. Never add provider or Supabase keys to it.
+
+Cost controls (app/core/): the three model-backed routes are rate limited per
+verified user id (defaults 20 searches/min, 10 room plans/min, 20 previews/hour;
+429 with Retry-After, localized) and cache identical requests for 15 minutes.
+Parses are cached by exact sentence; previews by exact prompt plus reference
+photo bytes, and only after every product is re-checked under the caller's
+token. Both are in process memory: correct for one server, must move to a
+shared store before a second. Every response carries X-Request-ID and produces
+one log line (method, encoded path, status, duration); headers, query strings,
+bodies and exception messages are never logged.
 
 ## 5. Backend Features
 
@@ -495,7 +514,10 @@ Compare:
 - tradeoffs
 - fit to user requirements
 
-Status: **Planned**
+Status: **Implemented (Phase 6D): POST /v1/compare, deterministic, facts
+only, never names a winner. "Fit to user requirements" is not included because
+the endpoint is not told the requirements. Similar products:
+GET /v1/catalog/products/{id}/similar.**
 
 ### 5.14 Audit / Observability
 
@@ -515,7 +537,9 @@ Future logs may include:
 
 Never log JWTs, passwords, service-role keys, or secrets.
 
-Status: **Planned / Partial**
+Status: **Partial. Request id, route, status and latency are logged per request
+(app/core/observability.py). User id, AI latency and AI failure counts are not
+yet.**
 
 ### 5.15 Security Migration Pipeline
 
@@ -716,7 +740,9 @@ AI may compare:
 
 All product facts come from backend data.
 
-Status: **Planned**
+Status: **Deterministic half implemented (POST /v1/compare, section 5.13). The
+AI half, answering "better for a small room", is not built: it needs the room's
+size as input, and then a judgement separated from the facts per 6.6.**
 
 ### 6.8 Room Image Analysis
 
@@ -1146,7 +1172,7 @@ AI RECOMMENDATION
 ├── Phase 6A Ranking / Scoring               DONE IN PHASE 4D (app/search/ranking.py)
 ├── Phase 6B Compatibility                   BLOCKED: needs seat/table heights
 ├── Phase 6C Explanation                     IMPLEMENTED LOCALLY, LIVE-VERIFIED
-├── Phase 6D Comparison                      NOT STARTED
+├── Phase 6D Comparison                      IMPLEMENTED LOCALLY (+ similar products)
 └── Phase 6.10 Nearest alternatives          IMPLEMENTED LOCALLY, LIVE-VERIFIED
 
 Phase 6C and 6.10 are in app/recommendations/ and deterministic: no provider is
@@ -1205,9 +1231,9 @@ OPTIMIZATION
 └── Phase 9D Ranking Optimization
 
 PRODUCTION
-├── Phase 10A Observability
+├── Phase 10A Observability                   PARTIAL (request id + log line)
 ├── Phase 10B Performance
-├── Phase 10C Cost Control
+├── Phase 10C Cost Control                    PARTIAL (per-user limits + cache)
 ├── Phase 10D Evaluation Monitoring
 └── Phase 10E Scale
 ```
@@ -1215,9 +1241,7 @@ PRODUCTION
 ## 14. Immediate Next Step
 
 ```text
-Phase 3.2C PR (branch → main)
-       ↓
-Human security review
+Human security review of the 3.2C package (on main, NOT applied)
        ↓
 approved?
   ├── no → correct + retest
@@ -1225,32 +1249,34 @@ approved?
        ↓
 controlled preflight → migration → verification → live acceptance → evidence
        ↓
-merge 3.2C; retarget the 3.2D PR to main
+the same review/apply cycle for 3.2D
        ↓
-Phase 3.2D: write live acceptance utility, then the same review/apply cycle
+remove the fake seed from the live project
        ↓
-Phase 4 AI foundation
+real customers
 ```
 
 The user changed priorities on 2026-09-17 and authorized the AI work ahead of
-the security review, for a demo on 2026-09-19. Phases 4A-4D, 5A and 5C are
-built, committed, pushed, and verified against the live Gemini API and the live
-catalogue. The security review is still the blocker for merging to `main` and
+the security review, for a demo on 2026-09-19, and on 2026-09-18 asked for
+everything to be on `main` with no other branches. All code is merged; none of
+the security SQL has been executed. The security review is still the blocker
 for real customers, and it has not moved.
 
-Handing the search feature to Flutter: docs/flutter-search-contract.md holds
-the request and response shapes dumped from the running app, the error codes,
-and a working Dart client. Two integration rules in it are not optional. Every
-decimal arrives as a JSON string, so a direct cast to double throws. And the
-displayed price must prefer `discount_price`, because search filters on what
-the customer pays.
+Handing features to Flutter: docs/flutter-search-contract.md holds search,
+rooms, compare and similar products, with request and response shapes, error
+codes (including 429 and X-Request-ID), and a working Dart client. Two
+integration rules in it are not optional. Every decimal arrives as a JSON
+string, so a direct cast to double throws. And the displayed price must prefer
+`discount_price`, because search filters on what the customer pays.
 
-Running the demo: docs/phase-5-demo-runbook.md.
+Running the demo: docs/phase-5-demo-runbook.md. Getting started:
+docs/getting-started.md.
 
-Next engineering step after the demo is Phase 5D evaluation, which turns parser
-quality into a measured number and decides whether semantic retrieval is worth
-adding. Before real customers: the 3.2C and 3.2D security review, and removing
-the fake seed from the live project.
+Engineering candidates after the demo, in the recommended order: enrichment
+data (styles, room types) so fuzzy search can be benchmarked and section 11's
+vector decision revisited; Phase 7A conversational clarification; per-user and
+AI-latency fields in the request log; a shared store for limits and cache
+before a second server.
 
 ## 15. Live-System Safety
 

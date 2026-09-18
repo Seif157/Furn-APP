@@ -152,17 +152,61 @@ async def run(*, render: bool, skip_rooms: bool) -> int:
                     )
                     ok = show_search(sentence, response) and ok
 
+            if ok:
+                ok = await check_compare_and_similar(client, headers) and ok
+
             if ok and not skip_rooms:
                 ok = await check_room(client, headers, render=render) and ok
 
     del headers
     del session
     print(
-        "\nPASSED: search and room planning work with a real signed-in session."
+        "\nPASSED: search, compare, similar and room planning work with a real "
+        "signed-in session."
         if ok
         else "\nFAILED"
     )
     return 0 if ok else 1
+
+
+async def check_compare_and_similar(
+    client: httpx.AsyncClient, headers: dict[str, str]
+) -> bool:
+    """No model call: similar products for one real product, then a comparison
+    of it with the first two suggestions."""
+
+    listing = await client.get("/v1/catalog/products?limit=1", headers=headers)
+    if listing.status_code != 200 or not listing.json()["items"]:
+        print(f"\n  FAILED  catalogue listing HTTP {listing.status_code}")
+        return False
+    product = listing.json()["items"][0]
+    print(f"\nsimilar to {product['name']}")
+    similar = await client.get(
+        f"/v1/catalog/products/{product['id']}/similar?limit=3&language=ar",
+        headers=headers,
+    )
+    if similar.status_code != 200:
+        print(f"  FAILED  similar HTTP {similar.status_code}")
+        return False
+    items = similar.json()["items"]
+    print(f"  ok  {len(items)} suggestions")
+    for item in items:
+        reasons = "; ".join(reason["text"] for reason in item["reasons"])
+        print(f"    - {item['product']['name']}  ({reasons})")
+    if not items:
+        return True
+
+    ids = [product["id"], *(item["product"]["id"] for item in items[:2])]
+    comparison = await client.post(
+        "/v1/compare", json={"product_ids": ids, "language": "ar"}, headers=headers
+    )
+    if comparison.status_code != 200:
+        print(f"  FAILED  compare HTTP {comparison.status_code}")
+        return False
+    print(f"  ok  compared {len(ids)} products")
+    for sentence in comparison.json()["summary"]:
+        print(f"    {sentence['text']}")
+    return True
 
 
 async def check_room(

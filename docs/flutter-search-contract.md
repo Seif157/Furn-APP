@@ -124,18 +124,29 @@ the code, display the message.
 | 401 | `invalid_access_token` | Session expired; sign in again |
 | 422 | `invalid_search_query` | Empty or over-long query |
 | 422 | FastAPI validation | Malformed body; this one is English only |
-| 503 | `search_unavailable` | Provider down or rate limited. Offer retry |
+| 429 | `rate_limited` | Too many searches from this account. Wait `Retry-After` seconds, then allow retry |
+| 503 | `search_unavailable` | Provider down or overloaded. Offer retry |
 | 502 | `search_upstream_error` | Answer could not be trusted. Ask them to rephrase |
 | 503 | `catalogue_service_unavailable` | Supabase unreachable |
 
 All errors are shaped `{"detail": {"code": ..., "message": ...}}`, except the
 FastAPI validation one, which uses its own format.
 
+Limits per signed-in account, by default: 20 searches a minute, 10 room plans a
+minute, 20 room previews an hour. Normal use never reaches them; a retry loop
+does. On 429, read the `Retry-After` header (whole seconds) and do not retry
+automatically before it passes.
+
+Every response, errors included, carries an `X-Request-ID` header. Log it, and
+show it on a "report a problem" screen: the backend finds the exact request
+from it.
+
 ## Timing
 
 Two to three seconds per search, nearly all of it the model. Show a spinner and
-disable the submit button. There is no caching, so an identical repeated query
-costs the same again.
+disable the submit button. An identical sentence repeated within 15 minutes
+skips the model and comes back in well under a second, but the catalogue is
+still read fresh, so prices and stock are always current.
 
 ## Copy this
 
@@ -455,6 +466,7 @@ Same codes as search. Two additions for the image call:
 |---|---|---|
 | 404 | `product_not_found` | A product is no longer for sale. Re-plan |
 | 502 | `search_upstream_error` | The model declined to draw it. Hide the preview, keep the plan |
+| 429 | `rate_limited` | Preview limit reached (20 an hour). Keep the plan; offer the preview again after `Retry-After` |
 
 ## Dart
 
@@ -550,3 +562,181 @@ cannot see them in your file layout, move these two methods into `SearchApi`.
 Typical screen flow: call `planRoom`, render the plan immediately, then if
 `plan.imageRequest != null` call `renderRoom` and fade the preview in when it
 arrives. If `renderRoom` throws, hide the preview and keep the plan.
+
+
+# Compare and similar products
+
+Neither calls a model: both are fast (well under a second), free, and never
+rate limited. Every value is a catalogue fact. Neither says which product is
+"better", because that depends on what the customer needs.
+
+## Compare 2 to 4 products
+
+```http
+POST /v1/compare
+Authorization: Bearer <access token>
+Content-Type: application/json
+
+{"product_ids": ["<uuid>", "<uuid>", "<uuid>"], "language": "ar"}
+```
+
+`language` is `"ar"` or `"en"` (default `"en"`); send the app's current
+language. Ids must be distinct. Fewer than 2 or more than 4 is a 422, and a
+product the customer cannot buy is a 404 `product_not_found`.
+
+```json
+{
+  "language": "ar",
+  "products": ["…the full products, in the order sent…"],
+  "rows": [
+    {
+      "code": "price",
+      "label": "السعر",
+      "values": [
+        {"product_id": "…", "text": "13,500 جنيه", "value": "13500"},
+        {"product_id": "…", "text": "9,900 جنيه", "value": "9900"}
+      ],
+      "highlight": ["<id of the cheaper one>"],
+      "highlight_rule": "lowest"
+    }
+  ],
+  "summary": [{"code": "cheapest", "text": "الأرخص: …، بفرق 3,600 جنيه عن الأغلى"}]
+}
+```
+
+Row codes, always in this order: `price`, `discount`, `width_cm`, `depth_cm`,
+`height_cm`, `footprint`, `weight_kg`, `materials`, `colours`, `stock`,
+`seller`. Render a table with `label` down the side and each value's `text` in
+its product's column. `value` is the number behind it (a decimal string, as
+everywhere) or null.
+
+`highlight` lists the products holding a notable value: lowest price, largest
+discount, smallest floor space, most units in stock. It is empty when all
+values are equal or one is missing, and a tie lists every product in it. Mark
+highlighted cells, for example in bold. `summary` holds up to three
+ready-to-show sentences.
+
+## Similar products
+
+```http
+GET /v1/catalog/products/{id}/similar?limit=6&language=ar
+Authorization: Bearer <access token>
+```
+
+`limit` is 1 to 12 (default 6). Returns real, in-stock products of the same
+kind, most similar first:
+
+```json
+{
+  "product_id": "…",
+  "language": "ar",
+  "items": [
+    {
+      "product": {"…": "full product"},
+      "price_difference": "-3600",
+      "reasons": [
+        {"code": "material", "text": "نفس الخامة: قماش"},
+        {"code": "colour", "text": "متاح كمان بلون بيج"},
+        {"code": "price", "text": "أرخص بـ 3,600 جنيه"}
+      ]
+    }
+  ],
+  "candidate_count": 45,
+  "truncated": false
+}
+```
+
+`price_difference` is this item's price minus the viewed product's; negative
+means cheaper. Show it as a "You may also like" row on the product page, with
+the first one or two `reasons` under each card. An empty `items` means nothing
+similar is in stock; hide the row.
+
+## Dart
+
+```dart
+class ComparisonCell {
+  ComparisonCell(this.productId, this.text, this.highlighted);
+  final String productId;
+  final String text;
+  final bool highlighted;
+}
+
+class ComparisonRow {
+  ComparisonRow(this.code, this.label, this.cells);
+  final String code;
+  final String label;
+  final List<ComparisonCell> cells;
+}
+
+class Comparison {
+  Comparison(this.products, this.rows, this.summary);
+  final List<SearchProduct> products;
+  final List<ComparisonRow> rows;
+  final List<String> summary;
+}
+
+class SimilarItem {
+  SimilarItem(this.product, this.priceDifference, this.reasons);
+  final SearchProduct product;
+  final double priceDifference; // negative = cheaper
+  final List<String> reasons;
+}
+
+extension CompareApi on SearchApi {
+  Future<Comparison> compare(List<String> ids, String language,
+      {required String accessToken}) async {
+    final r = await _client
+        .post(Uri.parse('$baseUrl/v1/compare'),
+            headers: {
+              'Authorization': 'Bearer $accessToken',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({'product_ids': ids, 'language': language}))
+        .timeout(const Duration(seconds: 20));
+    final body = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+    if (r.statusCode != 200) throw _error(body, r.statusCode);
+    return Comparison(
+      [
+        for (final p in body['products'] as List)
+          SearchProduct.fromJson(p as Map<String, dynamic>),
+      ],
+      [
+        for (final row in body['rows'] as List)
+          ComparisonRow(row['code'] as String, row['label'] as String, [
+            for (final v in row['values'] as List)
+              ComparisonCell(
+                v['product_id'] as String,
+                v['text'] as String,
+                (row['highlight'] as List).contains(v['product_id']),
+              ),
+          ]),
+      ],
+      [for (final s in body['summary'] as List) s['text'] as String],
+    );
+  }
+
+  Future<List<SimilarItem>> similar(String productId, String language,
+      {required String accessToken, int limit = 6}) async {
+    final r = await _client
+        .get(
+            Uri.parse('$baseUrl/v1/catalog/products/$productId/similar'
+                '?limit=$limit&language=$language'),
+            headers: {'Authorization': 'Bearer $accessToken'})
+        .timeout(const Duration(seconds: 20));
+    final body = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+    if (r.statusCode != 200) throw _error(body, r.statusCode);
+    return [
+      for (final i in body['items'] as List)
+        SimilarItem(
+          SearchProduct.fromJson(i['product'] as Map<String, dynamic>),
+          _decimal(i['price_difference'])!,
+          [for (final reason in i['reasons'] as List) reason['text'] as String],
+        ),
+    ];
+  }
+}
+```
+
+Like the room methods, these use `_client`, `baseUrl`, `_error`, `_decimal`
+and `SearchProduct` from the clients above; if your file layout hides private
+members, move these methods into `SearchApi`.

@@ -1,0 +1,41 @@
+# Offline checks on every push and pull request.
+#
+# The suite contacts neither Supabase nor Gemini, so CI needs no secrets and
+# none are configured here. Never add GEMINI_API_KEY or a Supabase key to this
+# workflow: the live scripts are run by hand, with explicit authorization.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Tests
+        run: uv run python -m pytest -q
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format
+        run: uv run ruff format --check .
+
+      - name: Whitespace
+        run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD

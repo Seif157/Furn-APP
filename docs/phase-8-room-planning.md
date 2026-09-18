@@ -218,5 +218,11 @@ asked.
 category photograph, not the listed product. Real products with their own
 photos will render closer to reality.
 
-**No caching, no rate limiting, and a preview costs noticeably more than a
-text call.** Fine for a demo; not for real traffic.
+**A preview costs noticeably more than a text call.** Since 2026-09-18 both
+room endpoints are rate limited per user (10 plans a minute, 20 previews an
+hour by default) and cache identical requests for 15 minutes; see
+`app/core/limits.py` and `app/core/cache.py`. A cached preview is returned only
+after every product has been looked up again under the caller's token, and
+only for an identical prompt and identical reference photos. Both live in
+process memory, which is correct for one server and must move to a shared
+store before a second.

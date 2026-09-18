@@ -96,7 +96,39 @@ an office chair the model correctly returned "كرسي مكتب", which resolved
 nothing because lookup matches a whole surface and not its tokens. Common
 multi-word phrasings are now listed explicitly for all five categories.
 
+## Comparison (6D), added 2026-09-18
+
+`POST /v1/compare` takes 2 to 4 product ids and returns them side by side:
+price, discount, width, depth, height, floor space, weight, materials, colours
+in stock, units in stock, seller. `app/recommendations/comparison.py`, no
+provider.
+
+It states facts and marks differences; it never names a winner. The master
+plan's example, "which of these three sofas is better for a small room?",
+needs the room's size, which this endpoint is not told, so answering it would
+be a guess. What it does say is checkable: the cheapest, the largest discount,
+the smallest floor space, the most units in stock. A row is highlighted only
+when its values differ and every one is known, and a tie highlights every
+product in it, because breaking a tie by list order would imply a preference
+that does not exist.
+
+Every product is looked up under the caller's own token and rechecked for
+eligibility, so a product the customer cannot buy is a 404, never a column.
+
+## Similar products, added 2026-09-18
+
+`GET /v1/catalog/products/{id}/similar`, `app/recommendations/similar.py`, no
+provider. Only in-stock products of the same kind, never the product itself.
+Ranked by shared catalogue facts: same material (2 each), a colour in common
+(1 each), a confirmed style (2 each), price closeness (up to 3, continuous so
+it breaks ties), and width within 10 cm (1). Each suggestion lists the facts it
+shares, and always its price difference, in the customer's language.
+
+Style is scored only from confirmed enrichment attributes, which are empty
+today, so on the current catalogue similarity is material, colour, price and
+size.
+
 ## Not built
 
 Compatibility rules (6B) need seat and table heights the catalogue does not
-record. Product comparison (6D) is a separate endpoint. Neither is started.
+record.
