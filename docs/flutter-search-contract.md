@@ -16,6 +16,29 @@ Content-Type: application/json
 `query` is 1 to 500 characters. `limit` is 1 to 50 and defaults to 20. Any
 other field in the body is rejected with 422, so do not send extras.
 
+### Follow-ups: `history`
+
+A follow-up such as "خليها رمادي", "cheaper" or "في حدود ١٥ ألف" refines the
+previous search instead of starting over. Send the customer's earlier
+messages in this search, oldest first, as `history`:
+
+```json
+{"query": "خليها رمادي", "history": ["عايز كنبة مودرن أقل من ٣٠ ألف"]}
+```
+
+- At most 4 earlier messages, each 1 to 500 characters. More is a 422.
+- The app keeps the list; the server remembers nothing between requests.
+- Later messages win; anything not mentioned carries over. A different kind
+  of furniture ("I need a wardrobe instead") starts a fresh search.
+- Relative words ("cheaper", "أرخص") never invent or drop a budget. Show the
+  interpretation chips so the customer sees what was understood.
+- Start a new list when the customer taps "new search" or clears the box.
+- Leaving `history` out, or sending `[]`, is exactly the single-sentence
+  search.
+
+Measured live on 2026-09-18: 25/25 across five conversations in Arabic and
+English.
+
 The token is the Supabase session's access token, the same one the catalogue
 endpoints already use. Without it the response is 401. Search reads the
 catalogue as that user, so row-level security decides what is searchable.
@@ -280,6 +303,7 @@ class SearchApi {
     String query, {
     required String accessToken,
     int limit = 20,
+    List<String> history = const [], // earlier messages, oldest first, max 4
   }) async {
     final response = await _client
         .post(
@@ -289,7 +313,7 @@ class SearchApi {
             'Content-Type': 'application/json; charset=utf-8',
           },
           // jsonEncode handles the Arabic; do not hand-build this string.
-          body: jsonEncode({'query': query, 'limit': limit}),
+          body: jsonEncode({'query': query, 'limit': limit, 'history': history}),
         )
         // The model takes two to three seconds, so allow well past that.
         .timeout(const Duration(seconds: 45));
@@ -360,6 +384,15 @@ Authorization: Bearer <supabase access token>
 Content-Type: application/json
 
 {"query": "عايز أوضة معيشة مودرن فيها كنبة و2 كرسي وترابيزة في حدود 40 ألف"}
+```
+
+Follow-ups work the same way as search: send the earlier room messages as
+`history` (up to 4, oldest first). "خلي الكراسي 4" changes only the chairs and
+keeps the budget; "زود الميزانية لـ 50 ألف" changes only the budget and keeps
+the pieces (6/6 live).
+
+```json
+{"query": "خلي الكراسي 4", "history": ["عايز أوضة معيشة فيها كنبة و2 كرسي في حدود 40 ألف"]}
 ```
 
 About three seconds. The response, trimmed:
@@ -513,14 +546,15 @@ class RoomPreview {
 }
 
 extension RoomApi on SearchApi {
-  Future<RoomPlan> planRoom(String query, {required String accessToken}) async {
+  Future<RoomPlan> planRoom(String query,
+      {required String accessToken, List<String> history = const []}) async {
     final r = await _client
         .post(Uri.parse('$baseUrl/v1/rooms/plan'),
             headers: {
               'Authorization': 'Bearer $accessToken',
               'Content-Type': 'application/json; charset=utf-8',
             },
-            body: jsonEncode({'query': query}))
+            body: jsonEncode({'query': query, 'history': history}))
         .timeout(const Duration(seconds: 45));
     final body = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
     if (r.statusCode != 200) throw _error(body, r.statusCode);

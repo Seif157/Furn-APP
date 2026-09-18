@@ -16,10 +16,16 @@ are pending human review; this file is the current overview until then.
 
 ## Endpoints
 
-Every `/v1` route requires `Authorization: Bearer <Supabase access token>`.
+Every `/v1` route requires `Authorization: Bearer <Supabase access token>`,
+except `/v1/meta`, `/v1/search/vocabulary`, `/v1/search/examples` and
+`/v1/reviews/public`, which describe the server or public data.
 
 | Route | What it does | Model call |
 |---|---|---|
+| `GET /v1/meta` | Switched-on features and limits | no |
+| `GET /v1/search/vocabulary` | Categories, colours, materials with both labels | no |
+| `GET /v1/search/examples` | Sentences known to work, per language | no |
+| `GET /v1/reviews/public` | A product's or seller's public reviews | no |
 | `GET /health` | Liveness | no |
 | `GET /v1/me` | The signed-in user's id | no |
 | `GET /v1/catalog/products` | A page of products the caller may buy | no |
@@ -34,8 +40,13 @@ The three model-backed routes are rate limited per user (429 with
 `Retry-After`) and cache identical requests. Every response carries an
 `X-Request-ID` that matches one line in the server log.
 
-The Flutter integration contract, with request and response shapes, error
-codes and a Dart client, is `docs/flutter-search-contract.md`.
+Search and room planning accept `history`, the customer's earlier messages,
+so a follow-up refines the previous answer instead of starting over.
+
+The Flutter developer starts at `docs/flutter-integration.md`; request and
+response shapes, error codes and a Dart client are in
+`docs/flutter-search-contract.md`; `docs/openapi.json` describes every
+endpoint and is checked against the code. Deployment: `docs/deploy.md`.
 
 ## Setup
 
