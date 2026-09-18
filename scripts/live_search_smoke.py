@@ -13,7 +13,7 @@ missing compared with the running server is the network socket.
 It asks for an email and a password in your terminal. The password is read
 without echo, and neither it nor the session token is ever printed, logged, or
 written anywhere. Typing them in is the authorization; nothing runs without it.
-It spends four Gemini calls, five with --render, and writes nothing
+It spends five Gemini calls, six with --render, and writes nothing
 except the preview image when asked for one.
 """
 
@@ -153,6 +153,9 @@ async def run(*, render: bool, skip_rooms: bool) -> int:
                     ok = show_search(sentence, response) and ok
 
             if ok:
+                ok = await check_meta_and_refinement(client, headers) and ok
+
+            if ok:
                 ok = await check_compare_and_similar(client, headers) and ok
 
             if ok and not skip_rooms:
@@ -161,12 +164,56 @@ async def run(*, render: bool, skip_rooms: bool) -> int:
     del headers
     del session
     print(
-        "\nPASSED: search, compare, similar and room planning work with a real "
-        "signed-in session."
+        "\nPASSED: search, follow-ups, compare, similar, public reviews and "
+        "room planning work with a real signed-in session."
         if ok
         else "\nFAILED"
     )
     return 0 if ok else 1
+
+
+async def check_meta_and_refinement(
+    client: httpx.AsyncClient, headers: dict[str, str]
+) -> bool:
+    """What the app asks on startup, and a follow-up that refines a search."""
+
+    meta = await client.get("/v1/meta")
+    if meta.status_code != 200 or not meta.json()["features"]["search"]:
+        print(f"\n  FAILED  /v1/meta HTTP {meta.status_code} or search off")
+        return False
+    print("\n  ok  /v1/meta reports search on")
+
+    first, follow_up = "عايز كنبة مودرن أقل من ٣٠ ألف", "خليها رمادي"
+    print(f"\n{first} ... {follow_up}")
+    response = await client.post(
+        "/v1/search",
+        json={"query": follow_up, "history": [first], "limit": 3},
+        headers=headers,
+    )
+    if response.status_code != 200:
+        print(f"  FAILED  refinement HTTP {response.status_code}")
+        return False
+    understood = response.json()["interpretation"]
+    price = understood["price"]["maximum"] if understood["price"] else None
+    category = understood["category"]["slug"] if understood["category"] else None
+    colours = [
+        t["slug"] for t in understood["preferred_colours"] + understood["colours"]
+    ]
+    print(f"  ok  category={category} max_price={price} colours={colours}")
+    if category != "sofas" or price is None or "grey" not in colours:
+        print("  FAILED  the follow-up did not keep the sofa and budget and add grey")
+        return False
+
+    reviews = await client.get("/v1/catalog/products?limit=1", headers=headers)
+    product_id = reviews.json()["items"][0]["id"]
+    public = await client.get(f"/v1/reviews/public?product_id={product_id}")
+    if public.status_code != 200:
+        print(f"  FAILED  public reviews HTTP {public.status_code}")
+        return False
+    print(
+        f"  ok  public reviews readable ({len(public.json()['items'])} for one product)"
+    )
+    return True
 
 
 async def check_compare_and_similar(
