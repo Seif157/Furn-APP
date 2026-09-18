@@ -1,0 +1,9 @@
+# The Phase 3.2C and 3.2D security tests pin the exact bytes of these files, and
+# those pins were recorded from a Windows checkout, where they have CRLF line
+# endings. Fixing the ending here keeps every pin true on every platform (CI
+# runs on Linux) without editing the packages that are pending human review.
+# The committed content is unchanged; only the working-tree line ending is.
+/README text eol=crlf
+/sql/phase-3.2c-security-hardening.sql text eol=crlf
+/sql/phase-3.2c-security-hardening-preflight.sql text eol=crlf
+/sql/phase-3.2c-security-hardening-verify.sql text eol=crlf
