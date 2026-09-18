@@ -6,13 +6,16 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0,<1.0.0",
+    # Runtime, not dev: every outbound call (Supabase Auth, the catalogue, the
+    # AI provider, product photos) goes through it. Listed only as a dev
+    # dependency, a production install without dev tools failed at import.
+    "httpx>=0.28.0,<1.0.0",
     "pydantic-settings>=2.8.0,<3.0.0",
     "uvicorn[standard]>=0.34.0,<1.0.0",
 ]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.0,<1.0.0",
     "pglast>=7.7,<8.0",
     "pytest>=8.3.0,<10.0.0",
     "ruff>=0.11.0,<1.0.0",
