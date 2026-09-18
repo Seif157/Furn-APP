@@ -39,3 +39,37 @@ jobs:
 
       - name: Whitespace
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
+
+  image:
+    # Builds the production image and proves it starts and answers /health.
+    # The values below are syntactically valid placeholders, not credentials:
+    # startup makes no network call, so nothing real is needed or reachable.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: docker build -t furn-api:ci .
+
+      - name: Start with placeholder configuration
+        run: |
+          docker run -d --name api -p 8000:8000 \
+            -e SUPABASE_URL=https://placeholder.supabase.co \
+            -e SUPABASE_PUBLISHABLE_KEY=sb_publishable_placeholder \
+            -e SUPABASE_AUTH_TIMEOUT_SECONDS=5 \
+            furn-api:ci
+
+      - name: Health and meta answer
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/health | grep -q '"status":"ok"'
+          # No AI key configured, so the AI features must report themselves off.
+          curl -fsS http://127.0.0.1:8000/v1/meta | grep -q '"search":false'
+
+      - name: Container logs
+        if: always()
+        run: docker logs api
