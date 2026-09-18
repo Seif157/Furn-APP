@@ -17,9 +17,10 @@ specification runs through, so two identical sentences return the same page.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.ai.models import ParsedRequirements
 from app.ai.provider import (
     AIProvider,
     AIProviderError,
@@ -40,6 +41,8 @@ from app.catalog.gateway import (
 )
 from app.catalog.normalization import normalize_product
 from app.catalog.transform import is_recommendation_eligible
+from app.core.cache import cache_key, get_ai_caches
+from app.core.limits import enforce_rate_limit
 from app.recommendations.alternatives import nearest_alternatives
 from app.search.dependencies import (
     get_optional_ai_provider,
@@ -79,6 +82,7 @@ class SearchRequest(BaseModel):
 
 @router.post("", response_model=SearchResponse)
 async def search(
+    request: Request,
     search_request: SearchRequest,
     authenticated_request: Annotated[
         AuthenticatedRequestContext,
@@ -95,11 +99,25 @@ async def search(
     language = detect_language(search_request.query)
     if provider is None:
         raise search_unavailable(language)
+    enforce_rate_limit(
+        request,
+        user_id=authenticated_request.user_id,
+        bucket="search",
+        language=language,
+    )
 
+    caches = get_ai_caches(request)
+    key = cache_key("search", str(search_request.limit), search_request.query)
     try:
-        parsed = await parse_requirements(
-            search_request.query, provider=provider, limit=search_request.limit
-        )
+        cached = caches.parses.get(key) if caches is not None else None
+        if isinstance(cached, ParsedRequirements):
+            parsed = cached
+        else:
+            parsed = await parse_requirements(
+                search_request.query, provider=provider, limit=search_request.limit
+            )
+            if caches is not None:
+                caches.parses.put(key, parsed)
     except InvalidQueryError:
         raise invalid_search_query("query_empty", language) from None
     except AIProviderUnavailableError:

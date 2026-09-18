@@ -29,6 +29,7 @@ MessageCode = Literal[
     "search_upstream_error",
     "query_empty",
     "query_too_long",
+    "rate_limited",
 ]
 
 MESSAGES: dict[MessageCode, dict[Literal["ar", "en"], str]] = {
@@ -47,6 +48,10 @@ MESSAGES: dict[MessageCode, dict[Literal["ar", "en"], str]] = {
     "query_too_long": {
         "en": "A search query is too long.",
         "ar": "نص البحث طويل جدًا.",
+    },
+    "rate_limited": {
+        "en": "Too many requests. Please wait a moment and try again.",
+        "ar": "طلبات كثيرة في وقت قصير. برجاء الانتظار قليلًا ثم المحاولة مرة أخرى.",
     },
 }
 

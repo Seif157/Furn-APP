@@ -43,7 +43,10 @@ from app.catalog.gateway import (
 )
 from app.catalog.normalization import CATEGORIES, COLOURS, normalize_product
 from app.catalog.transform import build_product_response, is_recommendation_eligible
+from app.core.cache import cache_key, get_ai_caches
+from app.core.limits import enforce_rate_limit
 from app.rooms.images import ReferenceImageFetcher
+from app.rooms.models import RoomSpecification
 from app.rooms.parser import parse_room_request
 from app.rooms.planner import plan_room
 from app.rooms.prompts import Piece, image_prompt
@@ -86,6 +89,7 @@ def _one_line(text: str) -> str:
 
 @router.post("/plan", response_model=RoomPlanResponse)
 async def plan(
+    request: Request,
     plan_request: RoomPlanRequest,
     authenticated_request: Annotated[
         AuthenticatedRequestContext, Depends(get_authenticated_request)
@@ -98,9 +102,25 @@ async def plan(
     language = detect_language(plan_request.query)
     if provider is None:
         raise search_unavailable(language)
+    enforce_rate_limit(
+        request,
+        user_id=authenticated_request.user_id,
+        bucket="room_plan",
+        language=language,
+    )
 
+    caches = get_ai_caches(request)
+    key = cache_key("room", plan_request.query)
     try:
-        specification = await parse_room_request(plan_request.query, provider=provider)
+        cached = caches.parses.get(key) if caches is not None else None
+        if isinstance(cached, RoomSpecification):
+            specification = cached
+        else:
+            specification = await parse_room_request(
+                plan_request.query, provider=provider
+            )
+            if caches is not None:
+                caches.parses.put(key, specification)
     except InvalidQueryError:
         raise invalid_search_query("query_empty", language) from None
     except AIProviderUnavailableError:
@@ -132,6 +152,7 @@ async def plan(
 
 @router.post("/image", response_model=RoomImageResponse)
 async def image(
+    request: Request,
     image_request: RoomImageRequest,
     authenticated_request: Annotated[
         AuthenticatedRequestContext, Depends(get_authenticated_request)
@@ -145,6 +166,12 @@ async def image(
     language = image_request.language
     if provider is None:
         raise search_unavailable(language)
+    enforce_rate_limit(
+        request,
+        user_id=authenticated_request.user_id,
+        bucket="room_image",
+        language=language,
+    )
 
     # The same product listed twice is one piece with a larger quantity, in
     # the first colour asked for.
@@ -214,8 +241,27 @@ async def image(
         else None,
         styles=tuple(_one_line(s) for s in image_request.styles if s.strip()),
     )
+    # Keyed on exactly what the model is given, so a cached render is reused
+    # only for an identical prompt and identical photos. Every product above
+    # was already re-checked under this caller's token, so a hit never shows
+    # anyone a product they could not see.
+    caches = get_ai_caches(request)
+    key = cache_key(
+        "room-image",
+        prompt,
+        *(reference.mime_type for reference in references),
+        *(reference.data for reference in references),
+    )
     try:
-        generated = await provider.generate_image(prompt=prompt, references=references)
+        cached = caches.images.get(key) if caches is not None else None
+        if isinstance(cached, ImageBytes):
+            generated = cached
+        else:
+            generated = await provider.generate_image(
+                prompt=prompt, references=references
+            )
+            if caches is not None:
+                caches.images.put(key, generated)
     except AIProviderUnavailableError:
         raise search_unavailable(language) from None
     except AIProviderError:

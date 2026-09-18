@@ -1,7 +1,7 @@
 """Validated application configuration."""
 
 import re
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, HttpUrl, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict, SettingsError
@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     )
     supabase_auth_timeout_seconds: Annotated[float, Field(gt=0, le=30)] = Field(
         validation_alias="SUPABASE_AUTH_TIMEOUT_SECONDS"
+    )
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
+        default="INFO", validation_alias="LOG_LEVEL"
     )
 
     @field_validator("supabase_url")
@@ -130,6 +133,23 @@ class AISettings(BaseSettings):
     seller could point an image at an internal address and have this server
     request it. The Supabase project host is always allowed in addition.
     """
+
+    rate_limit_search_per_minute: Annotated[int, Field(ge=1, le=1000)] = Field(
+        default=20, validation_alias="RATE_LIMIT_SEARCH_PER_MINUTE"
+    )
+    rate_limit_room_plan_per_minute: Annotated[int, Field(ge=1, le=1000)] = Field(
+        default=10, validation_alias="RATE_LIMIT_ROOM_PLAN_PER_MINUTE"
+    )
+    rate_limit_room_image_per_hour: Annotated[int, Field(ge=1, le=1000)] = Field(
+        default=20, validation_alias="RATE_LIMIT_ROOM_IMAGE_PER_HOUR"
+    )
+    """Per signed-in user. A preview costs far more than a text call, so it is
+    limited per hour rather than per minute."""
+    ai_cache_ttl_seconds: Annotated[float, Field(ge=0, le=86400)] = Field(
+        default=900.0, validation_alias="AI_CACHE_TTL_SECONDS"
+    )
+    """How long a parsed sentence or a rendered preview is reused. Zero turns
+    caching off. See app/core/cache.py for why sharing entries is safe."""
 
     @property
     def gemini_enabled(self) -> bool:

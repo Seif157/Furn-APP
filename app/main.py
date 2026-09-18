@@ -12,7 +12,11 @@ from app.ai.providers.gemini import build_gemini_provider
 from app.auth.gateway import SupabaseAuthGateway
 from app.catalog.gateway import SupabaseCatalogueGateway
 from app.catalog.router import router as catalogue_router
-from app.config import load_ai_settings, load_settings
+from app.config import AISettings, load_ai_settings, load_settings
+from app.core.cache import AICaches
+from app.core.limits import Limit, RateLimiter
+from app.core.observability import RequestLogMiddleware, configure_logging
+from app.recommendations.router import router as recommendations_router
 from app.rooms.images import ReferenceImageFetcher
 from app.rooms.router import router as rooms_router
 from app.routers.users import router as users_router
@@ -29,6 +33,16 @@ class HealthResponse(BaseModel):
     version: Literal["0.1.0"]
 
 
+def build_rate_limiter(ai_settings: AISettings) -> RateLimiter:
+    return RateLimiter(
+        {
+            "search": Limit(ai_settings.rate_limit_search_per_minute, 60),
+            "room_plan": Limit(ai_settings.rate_limit_room_plan_per_minute, 60),
+            "room_image": Limit(ai_settings.rate_limit_room_image_per_hour, 3600),
+        }
+    )
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     """Create and close the shared outbound Supabase HTTP client."""
@@ -39,6 +53,15 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # because a typo in a key should be loud rather than silently disabling a
     # feature.
     ai_settings = load_ai_settings()
+    configure_logging(settings.log_level)
+    # Cost controls for the paid model calls; see app/core/limits.py and
+    # app/core/cache.py.
+    application.state.rate_limiter = build_rate_limiter(ai_settings)
+    application.state.ai_caches = (
+        AICaches(ttl_seconds=ai_settings.ai_cache_ttl_seconds)
+        if ai_settings.ai_cache_ttl_seconds > 0
+        else None
+    )
     async with httpx.AsyncClient() as client:
         application.state.auth_gateway = SupabaseAuthGateway(
             client=client,
@@ -63,6 +86,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Furniture AI API", version="0.1.0", lifespan=lifespan)
+app.add_middleware(RequestLogMiddleware)
 
 
 @app.get(
@@ -84,3 +108,4 @@ app.include_router(users_router)
 app.include_router(catalogue_router)
 app.include_router(search_router)
 app.include_router(rooms_router)
+app.include_router(recommendations_router)
