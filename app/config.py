@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
         default="INFO", validation_alias="LOG_LEVEL"
     )
+    supabase_secret_key: SecretStr | None = Field(
+        default=None, validation_alias="SUPABASE_SECRET_KEY"
+    )
+    """The server-only Supabase secret key. It bypasses row-level security, so
+    exactly one component may use it: the cart gateway, to create a customer's
+    one cart (the 3.2D design forbids the client from inserting carts). Every
+    other request still runs as the signed-in user. Optional: without it the
+    app starts and only POST /v1/cart refuses."""
 
     @field_validator("supabase_url")
     @classmethod
@@ -65,6 +73,17 @@ class Settings(BaseSettings):
         raw_value = value.get_secret_value()
         if re.fullmatch(r"sb_publishable_[A-Za-z0-9_-]+", raw_value) is None:
             raise ValueError("SUPABASE_PUBLISHABLE_KEY is malformed")
+        return value
+
+    @field_validator("supabase_secret_key")
+    @classmethod
+    def require_secret_key(cls, value: SecretStr | None) -> SecretStr | None:
+        """Accept only a new-style secret key; never a legacy JWT or a mix-up."""
+
+        if value is None:
+            return None
+        if re.fullmatch(r"sb_secret_[A-Za-z0-9_-]+", value.get_secret_value()) is None:
+            raise ValueError("SUPABASE_SECRET_KEY is malformed")
         return value
 
 

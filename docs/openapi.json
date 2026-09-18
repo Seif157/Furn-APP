@@ -716,6 +716,56 @@
           }
         }
       }
+    },
+    "/v1/cart": {
+      "post": {
+        "tags": [
+          "cart"
+        ],
+        "summary": "Ensure Cart",
+        "description": "Return the caller's cart, creating it the first time.",
+        "operationId": "ensure_cart_v1_cart_post",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -746,6 +796,26 @@
         ],
         "title": "AlternativeResponse",
         "description": "A real product that missed, and exactly what it missed by.\n\nOffered only when nothing matched. Section 6.10 allows nearest real\nalternatives and forbids fabricating a product; these are catalogue rows\nthat failed the fewest constraints, with the shortfall stated plainly so a\ncustomer can decide whether to relax."
+      },
+      "CartResponse": {
+        "properties": {
+          "cart_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Cart Id"
+          },
+          "created": {
+            "type": "boolean",
+            "title": "Created"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cart_id",
+          "created"
+        ],
+        "title": "CartResponse"
       },
       "CategoryResponse": {
         "properties": {

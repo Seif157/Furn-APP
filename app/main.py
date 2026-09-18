@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict
 
 from app.ai.providers.gemini import build_gemini_provider
 from app.auth.gateway import SupabaseAuthGateway
+from app.cart.gateway import SupabaseCartCreator, SupabaseCustomerCartReader
+from app.cart.router import router as cart_router
 from app.catalog.gateway import SupabaseCatalogueGateway
 from app.catalog.router import router as catalogue_router
 from app.config import AISettings, load_ai_settings, load_settings
@@ -79,6 +81,16 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             client=client,
             settings=settings,
         )
+        application.state.cart_reader = SupabaseCustomerCartReader(
+            client=client,
+            settings=settings,
+        )
+        # The only place the secret key is used; see app/cart/gateway.py.
+        application.state.cart_creator = (
+            SupabaseCartCreator(client=client, settings=settings)
+            if settings.supabase_secret_key is not None
+            else None
+        )
         application.state.ai_provider = build_gemini_provider(
             client=client,
             settings=ai_settings,
@@ -119,3 +131,4 @@ app.include_router(search_router)
 app.include_router(rooms_router)
 app.include_router(recommendations_router)
 app.include_router(reviews_router)
+app.include_router(cart_router)

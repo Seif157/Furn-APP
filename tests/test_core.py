@@ -293,6 +293,8 @@ LIFESPAN_STATE = (
     "reference_fetcher",
     "review_gateway",
     "ai_settings",
+    "cart_reader",
+    "cart_creator",
     "rate_limiter",
     "ai_caches",
 )

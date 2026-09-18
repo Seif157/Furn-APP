@@ -79,6 +79,37 @@ error. Use `limits` for input lengths and counters instead of hard-coding them.
 | Room planner | `POST /v1/rooms/plan` | ~3 s. Send `history` for follow-ups |
 | Room preview image | `POST /v1/rooms/image` | 10-20 s. Body is the plan's `image_request` |
 | Catalogue list and detail | `GET /v1/catalog/products`, `/{id}` | Or Supabase directly, as today |
+| Cart, before the first "add to cart" | `POST /v1/cart` | Returns `cart_id`; then add lines in Supabase |
+
+## The cart
+
+Every customer has exactly one cart, and **the server creates it**. Before the
+first "add to cart", call:
+
+```http
+POST /v1/cart
+Authorization: Bearer <access token>
+```
+
+```json
+{"cart_id": "…", "created": true}
+```
+
+It is safe to call every time: the first call creates the cart, later calls
+return the same `cart_id` with `"created": false`. Then add, change and
+remove lines in Supabase directly, as today, using that `cart_id`:
+
+```dart
+await supabase.from('cart_line').insert({
+  'cart_id': cartId, 'product_color_id': colorId, 'quantity': 1,
+});
+```
+
+Stop inserting into the `cart` table from the app. It still works today, but
+the 3.2D security package removes that permission, and after that only this
+endpoint can create a cart. Errors: 409 `customer_profile_required` (a seller
+or admin account, or a customer without a profile yet), 503
+`cart_unavailable` (retry).
 
 ## Conversation: follow-ups keep context
 
@@ -129,9 +160,11 @@ These affect calls the app makes to Supabase directly:
 - **Service directory.** Only active service types, and only capabilities of
   approved parties with active services, are visible.
 
-Coming later (security package 3.2D, not applied): carts created by the
-backend, order status changed only through functions, and review edits
-removed. The app will need changes then; nothing changes before it is applied.
+Coming later (security package 3.2D, not applied): the app loses INSERT on
+`cart` (use `POST /v1/cart` now, and it keeps working), order status changes
+only through `advance_purchase_order` / `cancel_purchase_order`, service
+requests only through their four functions, and reviews can no longer be
+edited or deleted. Nothing else changes before 3.2D is applied.
 
 ## Generating a client
 

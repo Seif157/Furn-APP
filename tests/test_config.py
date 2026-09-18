@@ -58,16 +58,44 @@ def test_settings_reject_wrong_key_class() -> None:
         build_settings(SUPABASE_PUBLISHABLE_KEY="service_role_not_allowed")
 
 
-def test_settings_ignore_forbidden_unmodeled_key_classes() -> None:
+def test_settings_ignore_unmodeled_keys() -> None:
     settings = Settings(
         _env_file=None,
         **VALID_CONFIGURATION,
-        SUPABASE_SECRET_KEY="secret-key-must-not-be-loaded",
         SUPABASE_JWKS_URL="https://example.invalid/jwks.json",
     )
 
-    assert not hasattr(settings, "supabase_secret_key")
     assert not hasattr(settings, "supabase_jwks_url")
+    assert settings.supabase_secret_key is None
+
+
+# Until 2026-09-18 the secret key was never loaded at all. The 3.2D design
+# makes carts server-created, so the owner supplied it for that one purpose;
+# app/cart/gateway.py is its only user. These tests keep what matters: only a
+# well-formed secret key is accepted, and it never shows in any rendering.
+@pytest.mark.parametrize(
+    "value",
+    [
+        "secret-key-must-not-be-loaded",
+        "sb_publishable_not_a_secret",
+        "eyJhbGciOiJIUzI1NiJ9.legacy.jwt",
+        "sb_secret_",
+    ],
+)
+def test_settings_reject_a_malformed_secret_key(value: str) -> None:
+    with pytest.raises(ValidationError):
+        build_settings(SUPABASE_SECRET_KEY=value)
+
+
+def test_the_secret_key_never_appears_when_settings_are_shown() -> None:
+    secret = "sb_secret_do_not_print_this_value"
+    settings = build_settings(SUPABASE_SECRET_KEY=secret)
+
+    assert settings.supabase_secret_key is not None
+    assert settings.supabase_secret_key.get_secret_value() == secret
+    assert secret not in repr(settings)
+    assert secret not in str(settings)
+    assert secret not in settings.model_dump_json()
 
 
 @pytest.mark.parametrize("timeout", [0, -1, 31])

@@ -33,6 +33,7 @@ def test_every_route_flutter_uses_is_described() -> None:
         ("/v1/catalog/products/{product_id}/similar", "get"),
         ("/v1/reviews/public", "get"),
         ("/v1/me", "get"),
+        ("/v1/cart", "post"),
         ("/health", "get"),
     ):
         assert method in paths[path], (path, method)

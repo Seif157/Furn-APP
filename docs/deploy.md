@@ -17,6 +17,7 @@ Environment variables, set in the host's dashboard, never committed:
 | `SUPABASE_URL` | yes | `https://<project>.supabase.co` |
 | `SUPABASE_PUBLISHABLE_KEY` | yes | The publishable key. Never a secret key |
 | `SUPABASE_AUTH_TIMEOUT_SECONDS` | yes | `5` |
+| `SUPABASE_SECRET_KEY` | for carts | Server only; used solely to create a customer's cart. Mark it secret in the host's dashboard |
 | `GEMINI_API_KEY` | for AI | Without it the AI features report `false` in `/v1/meta` |
 | `IMAGE_REFERENCE_HOSTS` | for previews | Hosts product photos are fetched from |
 | `LOG_LEVEL` | no | `INFO` |
