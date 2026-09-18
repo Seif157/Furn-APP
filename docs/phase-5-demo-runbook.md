@@ -83,6 +83,8 @@ Always state a style: without one, a room can mix styles.
 | عايز أوضة معيشة مودرن فيها كنبة و2 كرسي وترابيزة في حدود 40 ألف | A coherent modern room, 24,330 of 40,000, with the colour to order for each piece |
 | a scandinavian living room with a sofa, two chairs and a table under 30000 | The same in English, all Scandinavian |
 | عايز كنبة و4 كراسي بـ 10 آلاف | Cannot be done for 10,000, and says so: the cheapest room is 8,700 over |
+| عايز أوضة معيشة مودرن فيها كنبة في حدود 12 ألف و2 كرسي وترابيزة، والميزانية كلها 25 ألف | A budget per piece and for the room. The sofa stays within 12,000, and an upgrade offers the modern sofa for 3,600 more, saying it matches «مودرن» and the room stays within 25,000 |
+| عايز أوضة فيها كنبة وكرسيين | No budget given, so the plan is complete and then asks for one |
 
 The preview is labelled "معاينة بالذكاء الاصطناعي" and carries a disclaimer.
 Leave both visible. It is generated, and it can drift, including drawing one

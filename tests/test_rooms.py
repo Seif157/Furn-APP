@@ -74,6 +74,7 @@ def test_a_room_draft_can_carry_no_marketplace_fact() -> None:
         "quantity",
         "colours",
         "materials",
+        "max_budget",
     }
     assert set(ROOM_SCHEMA["properties"]) == set(RoomDraft.model_fields)
     item_schema = ROOM_SCHEMA["properties"]["items"]["items"]["properties"]
@@ -371,13 +372,16 @@ def test_the_image_prompt_names_every_piece_against_its_own_photo() -> None:
         styles=("modern",),
     )
 
-    assert "modern style living room" in prompt
+    assert "interior photograph of a modern living room" in prompt
     assert (
         "one x sofas (كنبة مودرن), in grey: reproduce it from reference photograph 1"
         in prompt
     )
-    assert "2 x chairs (كرسي سفرة): reproduce it from reference photograph 2" in prompt
-    assert "no other large furniture" in prompt
+    assert (
+        "exactly 2 x chairs (كرسي سفرة): reproduce it from reference photograph 2"
+        in prompt
+    )
+    assert "Do not add any other seating, tables, beds or storage" in prompt
     assert "No people, no text" in prompt
 
 
@@ -396,3 +400,160 @@ def test_a_piece_without_a_photo_does_not_shift_the_others() -> None:
     assert "one x sofas (A): no photograph is available" in prompt
     assert "one x chairs (B): reproduce it from reference photograph 1" in prompt
     assert "photograph 2" not in prompt
+
+
+# --- budgets per piece ------------------------------------------------------------
+
+MODERN_SOFA_SENTENCE = "عايز كنبة مودرن في حدود 12 ألف"
+
+
+def test_a_budget_for_one_piece_becomes_that_lines_budget() -> None:
+    room = spec(
+        {
+            "items": [
+                {"category": "sofa", "max_budget": 12000},
+                {"category": "chair", "quantity": 2, "max_budget": 3000},
+            ],
+            "max_budget": 25000,
+        }
+    )
+
+    assert [s.budget for s in room.slots] == [Decimal("12000"), Decimal("3000")]
+    assert room.budget == Decimal("25000")
+
+
+def test_merged_lines_add_their_budgets_only_when_every_part_had_one() -> None:
+    both = spec(
+        {
+            "items": [
+                {"category": "chair", "max_budget": 1500},
+                {"category": "كرسي", "max_budget": 2000},
+            ]
+        }
+    )
+    one = spec(
+        {"items": [{"category": "chair", "max_budget": 1500}, {"category": "كرسي"}]}
+    )
+
+    assert both.slots[0].budget == Decimal("3500")
+    # Half a budget is not a budget for the whole line, so none is invented.
+    assert one.slots[0].budget is None
+
+
+@pytest.mark.parametrize("budget", [0, -1, 1e12])
+def test_an_impossible_piece_budget_rejects_the_draft(budget: float) -> None:
+    with pytest.raises(RoomDraftError):
+        spec({"items": [{"category": "sofa", "max_budget": budget}]})
+
+
+def test_a_piece_budget_is_respected_when_something_fits(catalogue) -> None:
+    room = spec(
+        {"items": [{"category": "كنبة", "max_budget": 12000}], "styles": ["modern"]},
+        MODERN_SOFA_SENTENCE,
+    )
+
+    plan = plan_room(catalogue, room)
+
+    (item,) = plan.items
+    assert item.line_total <= Decimal("12000")
+    assert item.over_budget_by is None
+    assert plan.every_line_within_budget
+
+
+def test_a_piece_nothing_can_satisfy_is_the_closest_and_says_by_how_much(
+    catalogue,
+) -> None:
+    room = spec({"items": [{"category": "sofa", "max_budget": 1000}]})
+
+    plan = plan_room(catalogue, room)
+
+    (item,) = plan.items
+    cheapest = min(p.effective_price for p in catalogue if p.category.slug == "sofas")
+    assert item.line_total == cheapest
+    assert item.over_budget_by == cheapest - Decimal("1000")
+    assert not plan.every_line_within_budget
+
+
+# --- upgrades -----------------------------------------------------------------
+
+
+def test_a_better_match_just_past_a_piece_budget_is_offered(catalogue) -> None:
+    # The modern sofa costs 13,500: over a 12,000 budget, but within 15% of it,
+    # and it is the only sofa whose own listing says "مودرن".
+    room = spec(
+        {"items": [{"category": "كنبة", "max_budget": 12000}], "styles": ["modern"]},
+        MODERN_SOFA_SENTENCE,
+    )
+
+    (item,) = plan_room(catalogue, room).items
+
+    (upgrade,) = item.upgrades
+    assert "مودرن" in upgrade.candidate.product.name.original
+    assert upgrade.candidate.score > item.candidate.score
+    assert upgrade.extra == upgrade.candidate.product.effective_price - item.line_total
+
+
+def test_nothing_is_offered_beyond_the_small_margin(catalogue) -> None:
+    # 13,500 is more than 15% past 11,000, so it is not "a little more".
+    room = spec(
+        {"items": [{"category": "كنبة", "max_budget": 11000}], "styles": ["modern"]},
+        MODERN_SOFA_SENTENCE,
+    )
+
+    (item,) = plan_room(catalogue, room).items
+
+    assert item.upgrades == ()
+
+
+def test_without_any_budget_there_is_nothing_better_to_offer(catalogue) -> None:
+    # With no budget the planner already takes the best match.
+    room = spec({"items": [{"category": "كنبة"}], "styles": ["modern"]}, "كنبة مودرن")
+
+    (item,) = plan_room(catalogue, room).items
+
+    assert "مودرن" in item.candidate.product.name.original
+    assert item.upgrades == ()
+
+
+@pytest.mark.parametrize("room_budget", [15000, 20000, 25000, 30000])
+def test_every_upgrade_obeys_the_rules(catalogue, room_budget: int) -> None:
+    room = spec(
+        {
+            "items": [
+                {"category": "sofa"},
+                {"category": "chair", "quantity": 2},
+                {"category": "table"},
+            ],
+            "max_budget": room_budget,
+            "styles": ["modern"],
+        },
+        "أوضة مودرن فيها كنبة و2 كرسي وترابيزة",
+    )
+
+    plan = plan_room(catalogue, room)
+
+    for item in plan.items:
+        for upgrade in item.upgrades:
+            line = upgrade.candidate.product.effective_price * item.slot.quantity
+            assert upgrade.candidate.score > item.candidate.score
+            assert line > item.line_total
+            assert upgrade.room_total == plan.total - item.line_total + line
+            assert upgrade.room_total <= Decimal(room_budget) * Decimal("1.15")
+            assert upgrade.candidate.product.category.slug == item.slot.category
+            assert upgrade.candidate.colour.stock_quantity >= item.slot.quantity
+
+
+def test_filler_words_in_a_request_never_count_as_a_match(catalogue) -> None:
+    # Found live: "13000 in total" let a leather sofa tie with the modern sofa
+    # the customer asked for, because its description contains "in". An
+    # upgrade reason would then have claimed it "matches “in”".
+    from app.search.models import query_text
+    from app.search.ranking import matched_query_words
+
+    query = query_text("a modern sofa, 12000 for the sofa and 13000 in total")
+    for product in catalogue:
+        words = set(matched_query_words(product, query))
+        assert not words & {"in", "for", "the", "and", "total", "a"}
+    arabic = query_text("عايز كنبة مودرن في حدود 12 ألف")
+    for product in catalogue:
+        assert not set(matched_query_words(product, arabic)) & {"في", "حدود", "عايز"}

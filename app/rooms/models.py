@@ -39,6 +39,8 @@ class RoomItemDraft(BaseModel):
     """Preferences: a described colour ranks, it does not filter."""
     materials: SurfaceList = ()
     """Requirements: a customer who names a material rarely accepts another."""
+    max_budget: Decimal | None = None
+    """What the customer will spend on this line, all units together."""
 
 
 class RoomDraft(BaseModel):
@@ -64,6 +66,8 @@ class RoomSlot:
     quantity: int
     hard: HardConstraints
     soft: SoftPreferences
+    budget: Decimal | None = None
+    """For the whole line, every unit together."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +77,9 @@ class RoomSpecification:
     slots: tuple[RoomSlot, ...]
     budget: Decimal | None
     query: QueryText
+    scoring_query: QueryText
+    """The sentence without count words, used for ranking; ``query`` is
+    what the customer actually wrote."""
     language: Language
     styles: tuple[str, ...]
     room_type: str | None

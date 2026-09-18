@@ -38,9 +38,15 @@ items lists each kind of furniture they asked for, with how many.
   a preference. A material they attach to one piece goes in that item's
   materials, as a requirement.
 
-max_budget is the total the customer wants to spend on the whole room, as a
-plain number of Egyptian pounds. Read "40 ألف", "٤٠ ألف", "40k" and "40,000"
-all as 40000. Ignore the currency word. Omit it when no budget is stated. Never
+  A budget the customer gives for one piece goes in that item's max_budget, as
+  the total for that line. When they give a price per piece, multiply it by the
+  quantity: "2 كرسي بـ 1500 للواحد" and "two chairs at 1500 each" are
+  max_budget 3000. When they give one amount for several pieces together,
+  such as "2 كرسي في حدود 3000", use it as it is.
+
+max_budget at the top level is the total the customer wants to spend on the
+whole room. Read "40 ألف", "٤٠ ألف", "40k" and "40,000" all as 40000. Ignore
+the currency word. Omit any budget that is not stated; never invent one. Never
 return a negative or zero number.
 
 styles and preferred_colours describe the whole room, for example "أوضة مودرن"
@@ -90,6 +96,7 @@ ROOM_SCHEMA: dict[str, Any] = {
                     },
                     "colours": _SURFACE_LIST,
                     "materials": _SURFACE_LIST,
+                    "max_budget": {"type": "NUMBER", "nullable": True},
                 },
                 "propertyOrdering": list(RoomItemDraft.model_fields),
             },
@@ -132,20 +139,28 @@ def image_prompt(
 ) -> str:
     """Build the rendering instruction from real catalogue products.
 
-    Every piece named here is a real product the customer can buy; the
-    instruction asks the model to reproduce each from its own photograph, in
-    the colour the plan chose, and to add no other large furniture, so the
-    preview shows the plan rather than an invented room.
+    Two goals pull against each other and both are kept. The room should look
+    like something a customer wants to live in: a designer's composition,
+    warm light, a palette built around the products, tasteful styling. And the
+    furniture must stay exactly the plan: each piece reproduced from its own
+    photograph, in the colour the plan chose, in the planned quantity, with no
+    extra seating, tables, beds or storage that a customer could mistake for
+    part of the purchase. Decor is allowed only because it is small, and the
+    disclaimer says it is illustration.
     """
 
     room = room_type or "living room"
-    style = f"{', '.join(styles)} style " if styles else ""
+    style = ", ".join(styles) if styles else "warm contemporary"
     lines = [
-        f"A photorealistic interior photograph of a {style}{room}, furnished with "
-        "exactly the following pieces and no other large furniture:",
+        f"A beautiful, magazine-quality interior photograph of a {style} {room}, "
+        "styled by a professional interior designer. It should feel inviting, "
+        "calm and lived-in, the kind of room a person would love to come home to.",
+        "",
+        "The room contains exactly these pieces of furniture, and every single "
+        "one must be clearly and fully visible:",
     ]
     for piece in pieces:
-        count = "one" if piece.quantity == 1 else str(piece.quantity)
+        count = "one" if piece.quantity == 1 else f"exactly {piece.quantity}"
         colour = f", in {piece.colour}" if piece.colour else ""
         if piece.photo is not None:
             source = (
@@ -154,11 +169,39 @@ def image_prompt(
             )
         else:
             source = "no photograph is available; show a typical one"
-        lines.append(f"- {count} x {piece.category} ({piece.name}){colour}: {source}.")
+        # Stated twice on purpose. Asked for two chairs with the count alone,
+        # the model drew one in two renders out of three on 2026-09-18.
+        copies = (
+            f" Show {piece.quantity} separate, identical copies of this piece, "
+            f"every one of the {piece.quantity} fully visible."
+            if piece.quantity > 1
+            else ""
+        )
+        lines.append(
+            f"- {count} x {piece.category} ({piece.name}){colour}: {source}.{copies}"
+        )
     lines += [
-        "Arrange them as a real room would be arranged, fully visible and to "
-        "scale with one another.",
-        "Neutral walls and floor. Natural daylight.",
+        "Count them: the number of each piece in the picture must match this list "
+        "exactly. Do not add any other seating, tables, beds or storage.",
+        "",
+        "Composition: arrange the pieces the way an interior designer would, "
+        "balanced and purposeful. Sofas stand against a wall or float facing the "
+        "room; chairs are grouped around the table they belong to or angled "
+        "towards the sofa for conversation. Everything is to scale with everything "
+        "else and with a spacious, uncluttered room, with clear walking space.",
+        "",
+        "Styling: a harmonious colour palette built around the furniture's own "
+        f"colours, suited to a {style} interior. Soft, warm natural daylight from "
+        "a large window with sheer curtains, gentle shadows. Finish the room with "
+        "small, tasteful decor only: a textured area rug, a few green plants, "
+        "cushions and a throw, a floor or table lamp, framed wall art, and a "
+        "couple of books or a vase. Decor must stay small and must never look "
+        "like additional furniture.",
+        "",
+        "Camera: eye level, wide angle, straight verticals, sharp focus, "
+        "photorealistic, rich detail and texture, professional interior "
+        "photography.",
+        "",
         "No people, no text, no logos, no watermarks.",
     ]
     return "\n".join(lines)

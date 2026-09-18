@@ -394,6 +394,27 @@ The same two rules as search apply. Every decimal is a JSON string, and
 - `clarification` is set, and `items` empty, when the sentence named no
   furniture at all.
 
+### Budgets and upgrades
+
+Each item also carries:
+
+- `budget` and `over_budget_by`: the budget the customer set for that line,
+  all units together, and how far over it the pick is. Both null when no
+  budget was given for the piece.
+- `upgrades`: up to two options for the same piece that cost a little more and
+  match better. Each has `summary`, one ready-made sentence in the customer's
+  language, for example "بزيادة 3,600 جنيه: بيطابق «مودرن» اللي طلبته، أكتر من
+  ميزانية القطعة بـ 1,500 جنيه، والأوضة تفضل في حدود ميزانيتك". Show it under
+  the item with a "switch" action. `extra_cost`, `room_total` and
+  `within_room_budget` are there if you want your own layout.
+
+The plan also carries `every_line_within_budget`, and `budget_question` when
+the customer gave no budget at all. Show the question as a gentle prompt under
+the plan; the plan is already complete.
+
+To preview the room with an upgrade, replace that item in `image_request.items`
+with the upgrade's `image_item`, then call the image endpoint as usual.
+
 ## 2. Render the preview
 
 Send `image_request` from the plan back unchanged:

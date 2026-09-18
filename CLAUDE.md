@@ -105,7 +105,7 @@ it without explicit authorization).
 Latest verification (2026-09-17, on the phase-4a-catalogue-audit branch):
 
 ```text
-pytest:                  660 passed
+pytest:                  680 passed
 ruff:                    passed
 format:                  passed
 git diff --check:        clean
@@ -1185,6 +1185,14 @@ server-side through an HTTPS host allowlist because the URLs are
 seller-controlled. Default image model gemini-2.5-flash-image (14.5 s against 29
 s for nano-banana-pro-preview at comparable fidelity). Design, measurements and
 known limits: docs/phase-8-room-planning.md.
+
+Room plans accept a budget per piece and for the whole room, ask for one when
+none is given (without blocking), and offer up to two upgrades per piece: a
+real product that scores higher on what the customer asked for and costs at
+most 15% past the budget it would exceed. "Better" is never price or taste;
+each upgrade states the concrete thing it matches. The preview prompt now asks
+for a designer-styled room with small decor, while still forbidding extra
+furniture; the disclaimer says decor is illustration only.
 
 Photo analysis was probed on 2026-09-18 and works, but gemini-2.5-flash-image
 deleted existing furniture when editing a customer's room photo, and customer

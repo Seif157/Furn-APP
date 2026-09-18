@@ -356,7 +356,7 @@ async def test_a_preview_is_rendered_from_real_products_and_labelled() -> None:
     ]
     assert "كنبة مودرن 3 مقاعد" in call["prompt"]
     assert "2 x chairs" in call["prompt"]
-    assert "modern style living room" in call["prompt"]
+    assert "modern living room" in call["prompt"]
 
 
 @pytest.mark.anyio
@@ -563,3 +563,121 @@ async def test_the_plan_passes_each_chosen_colour_to_the_image_request() -> None
     ):
         colour_ids = {c["id"] for c in item["product"]["colors"]}
         assert requested["colour_id"] in colour_ids
+
+
+# --- budgets, upgrades and the budget question -----------------------------------
+
+
+@pytest.mark.anyio
+async def test_with_no_budget_at_all_the_plan_asks_for_one_without_blocking() -> None:
+    provider = StubProvider({"items": [{"category": "كنبة"}, {"category": "كرسي"}]})
+
+    async with room_client(seed_catalogue, provider) as client:
+        payload = (
+            await client.post(
+                "/v1/rooms/plan",
+                json={"query": "عايز كنبة وكرسي"},
+                headers=auth_headers(),
+            )
+        ).json()
+
+    assert payload["items"], "the plan is complete, the question is an invitation"
+    assert "ميزانية للأوضة كلها أو لكل قطعة" in payload["budget_question"]
+
+
+@pytest.mark.anyio
+async def test_any_stated_budget_means_no_budget_question() -> None:
+    provider = StubProvider({"items": [{"category": "sofa", "max_budget": 12000}]})
+
+    async with room_client(seed_catalogue, provider) as client:
+        payload = (
+            await client.post(
+                "/v1/rooms/plan",
+                json={"query": "a sofa under 12000"},
+                headers=auth_headers(),
+            )
+        ).json()
+
+    assert payload["budget_question"] is None
+    (item,) = payload["items"]
+    assert item["budget"] == "12000"
+    assert item["over_budget_by"] is None
+
+
+@pytest.mark.anyio
+async def test_an_upgrade_says_what_it_costs_and_exactly_why_it_is_better() -> None:
+    provider = StubProvider(
+        {"items": [{"category": "كنبة", "max_budget": 12000}], "styles": ["modern"]}
+    )
+
+    async with room_client(seed_catalogue, provider) as client:
+        payload = (
+            await client.post(
+                "/v1/rooms/plan",
+                json={"query": "عايز كنبة مودرن في حدود 12 ألف"},
+                headers=auth_headers(),
+            )
+        ).json()
+
+    (item,) = payload["items"]
+    (upgrade,) = item["upgrades"]
+    assert upgrade["product"]["id"] == MODERN_SOFA_ID
+    assert Decimal(upgrade["extra_cost"]) == Decimal(upgrade["line_total"]) - Decimal(
+        item["line_total"]
+    )
+    assert Decimal(upgrade["over_item_budget_by"]) == Decimal("1500")
+    # A fact the customer can check, not a judgement.
+    assert [r["code"] for r in upgrade["reasons"]] == ["query"]
+    assert "«مودرن»" in upgrade["reasons"][0]["text"]
+    assert upgrade["summary"].startswith("بزيادة ")
+    assert "أكتر من ميزانية القطعة بـ 1,500 جنيه" in upgrade["summary"]
+    # Ready to swap into the preview request.
+    assert upgrade["image_item"]["product_id"] == MODERN_SOFA_ID
+    assert upgrade["image_item"]["colour_id"]
+
+
+@pytest.mark.anyio
+async def test_an_upgrade_reports_what_it_does_to_the_room_budget() -> None:
+    provider = StubProvider(
+        {
+            "items": [{"category": "sofa", "max_budget": 12000}],
+            "max_budget": 13000,
+            "styles": ["modern"],
+        }
+    )
+
+    async with room_client(seed_catalogue, provider) as client:
+        payload = (
+            await client.post(
+                "/v1/rooms/plan",
+                json={"query": "a modern sofa, 12000 for the sofa and 13000 in total"},
+                headers=auth_headers(),
+            )
+        ).json()
+
+    (upgrade,) = payload["items"][0]["upgrades"]
+    assert upgrade["within_room_budget"] is False
+    assert "and the room goes 500 EGP over your budget" in upgrade["summary"]
+
+
+@pytest.mark.anyio
+async def test_the_preview_prompt_asks_for_a_styled_room_but_no_extra_furniture() -> (
+    None
+):
+    provider = StubProvider()
+
+    async with room_client(seed_catalogue, provider, FakeFetcher()) as client:
+        await client.post(
+            "/v1/rooms/image",
+            json={
+                "items": [{"product_id": MODERN_SOFA_ID}],
+                "styles": ["modern"],
+            },
+            headers=auth_headers(),
+        )
+
+    prompt = provider.image_calls[0]["prompt"]
+    assert "magazine-quality" in prompt
+    assert "interior designer" in prompt
+    assert "Do not add any other seating, tables, beds or storage" in prompt
+    assert "must never look like additional furniture" in prompt

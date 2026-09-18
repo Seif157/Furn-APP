@@ -52,24 +52,155 @@ def _closeness(actual: Decimal | None, target: Decimal) -> Decimal | None:
     )
 
 
+# Words that say nothing about a product, in their normalized form (Arabic
+# letters folded as ``normalize_text`` folds them). Found live on 2026-09-18:
+# "13000 in total" let a leather sofa tie with the modern one the customer
+# asked for, because its description happened to contain "in". Only the
+# customer's side is filtered; product text is left exactly as it is.
+QUERY_STOPWORDS = frozenset(
+    {
+        # English function words and request vocabulary.
+        "an",
+        "the",
+        "and",
+        "or",
+        "for",
+        "in",
+        "on",
+        "of",
+        "with",
+        "to",
+        "at",
+        "by",
+        "from",
+        "me",
+        "my",
+        "we",
+        "our",
+        "need",
+        "want",
+        "would",
+        "like",
+        "looking",
+        "some",
+        "any",
+        "under",
+        "over",
+        "less",
+        "than",
+        "more",
+        "about",
+        "around",
+        "up",
+        "is",
+        "are",
+        "be",
+        "it",
+        "that",
+        "this",
+        "please",
+        "total",
+        "budget",
+        "each",
+        "egp",
+        "le",
+        "pounds",
+        "pound",
+        "maximum",
+        "max",
+        "most",
+        "least",
+        "not",
+        "no",
+        "but",
+        "just",
+        "only",
+        # Egyptian Arabic function words and request vocabulary, normalized.
+        "في",
+        "من",
+        "علي",
+        "الي",
+        "عن",
+        "مع",
+        "او",
+        "لو",
+        "كل",
+        "كده",
+        "عايز",
+        "عاوز",
+        "عايزه",
+        "محتاج",
+        "محتاجه",
+        "نفسي",
+        "انا",
+        "احنا",
+        "اللي",
+        "ده",
+        "دي",
+        "دا",
+        "فيها",
+        "فيه",
+        "بس",
+        "كام",
+        "حدود",
+        "ميزانيه",
+        "اقل",
+        "اكتر",
+        "اقصي",
+        "حد",
+        "الف",
+        "جنيه",
+        "للواحد",
+        "بتاع",
+        "بتاعه",
+        "حوالي",
+        "تقريبا",
+    }
+)
+
+
 def _tokens(text: str) -> list[str]:
     """Unicode word tokens; punctuation and separators are dropped."""
 
     return [token for token in WORD.findall(text) if len(token) > 1]
 
 
-def _query_overlap(product: NormalizedProduct, query: QueryText) -> Decimal:
-    tokens = _tokens(query.normalized)
-    if not tokens:
-        return ZERO
+def _query_tokens(query: QueryText) -> list[str]:
+    return [t for t in _tokens(query.normalized) if t not in QUERY_STOPWORDS]
+
+
+def _haystack(product: NormalizedProduct) -> set[str]:
     haystack = set(product.search_terms)
     haystack.update(_tokens(product.name.normalized))
     if product.description is not None:
         haystack.update(_tokens(product.description.normalized))
     for term in product.search_terms:
         haystack.update(_tokens(term))
+    return haystack
+
+
+def _query_overlap(product: NormalizedProduct, query: QueryText) -> Decimal:
+    tokens = _query_tokens(query)
+    if not tokens:
+        return ZERO
+    haystack = _haystack(product)
     hits = sum(1 for token in tokens if token in haystack)
     return _fraction(hits, len(tokens))
+
+
+def matched_query_words(
+    product: NormalizedProduct, query: QueryText
+) -> tuple[str, ...]:
+    """The customer's own words this product's catalogue text contains.
+
+    The same matching the query score component uses, exposed so an
+    explanation can name the words rather than cite a number.
+    """
+
+    haystack = _haystack(product)
+    return tuple(
+        dict.fromkeys(token for token in _query_tokens(query) if token in haystack)
+    )
 
 
 def score_parts(

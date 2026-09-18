@@ -123,6 +123,81 @@ Real Gemini, live catalogue of 45 products, live photo fetches.
 | a scandinavian living room with a sofa, two chairs and a table under 30000 | Scandinavian sofa, 2 Scandinavian chairs, dining set. 22,800 of 30,000 |
 | عايز كنبة و4 كراسي بـ 10 آلاف | Cheapest possible room is 18,700, and the summary says it is 8,700 over |
 
+## Budgets for each piece and for the whole room
+
+Added on 2026-09-18 at the user's request. A customer can give a budget for one
+piece, for the room, or both: "كنبة في حدود 12 ألف و2 كرسي بـ 2000 للواحد،
+والميزانية كلها 25 ألف". A price per piece is multiplied by the quantity, so two
+chairs at 2,000 each is a 4,000 line budget. A room is within budget only when
+every line is within its own budget and the total is within the room's; when
+nothing fits, the room that is over by the least comes back, and each response
+line says whether it is over its own budget and by how much.
+
+When the customer gives no budget at all, the plan is still complete, and
+`budget_question` invites one: "تحب تحدد ميزانية للأوضة كلها أو لكل قطعة؟
+هنختارلك أنسب حاجة في حدودها ونقولك لو فيه حاجة أحسن بفرق بسيط." It never
+blocks the answer.
+
+## Something better for a little more
+
+Each planned piece can carry up to two upgrades: another real product for the
+same piece that costs a little more and is measurably better. Both halves of
+that sentence are defined precisely, because a vague version would invent
+claims.
+
+**"Better" means it scores higher on what this customer asked for**, using the
+same scoring search uses. Nothing is called nicer, premium or higher quality,
+because nothing in the catalogue measures those, and section 6.6 of the master
+plan forbids presenting judgement as fact. Each upgrade's `reasons` name the
+concrete thing it matches that the current pick does not: the customer's own
+words in its listing, a preferred colour it is in stock in, a size closer to
+the one asked for.
+
+**"A little more" means at most 15% past the budget it would exceed**: a line
+may reach 115% of its own budget, the room 115% of the room's. With no budget
+at all nothing is offered, because the planner has already taken the best match.
+
+Live, for "عايز أوضة معيشة مودرن فيها كنبة في حدود 12 ألف و2 كرسي وترابيزة،
+والميزانية كلها 25 ألف", the plan kept the sofa at 9,900 within its 12,000
+budget and offered:
+
+> بزيادة 3,600 جنيه: بيطابق «مودرن» اللي طلبته، أكتر من ميزانية القطعة بـ 1,500
+> جنيه، والأوضة تفضل في حدود ميزانيتك
+
+Each upgrade also carries `image_item`, ready to swap into the preview request
+to see the room with it.
+
+Verifying this caught two scoring bugs that predated it. Filler words in a
+request counted as matches: "13000 in total" let a leather sofa tie with the
+modern one because its description contains "in", which would also have
+produced an upgrade reason claiming it "matches “in”". Function words and
+request vocabulary in both languages are now ignored when matching, in search
+too. And in room requests count words counted: "two chairs" matched a sofa
+described as "two-seat". Count words are now left out of the words a room is
+ranked by.
+
+## A room worth looking at
+
+The first previews were accurate and bare: a white box with furniture parked in
+it. The rendering prompt now asks for a magazine-quality photograph composed by
+an interior designer: sofas against a wall or floating to face the room, chairs
+grouped around their table, warm daylight through sheer curtains, a palette
+built around the furniture's own colours, and small decor such as a rug,
+plants, cushions, a lamp and framed art.
+
+The furniture rules did not loosen. Each piece is still reproduced from its own
+photo, in the planned colour, in the planned quantity, with an explicit
+instruction to add no other seating, tables, beds or storage. Decor is allowed
+only because it is small, and the disclaimer now says decor is illustration
+only and that the listed products are what the customer buys.
+
+In the live render the room looked like a real interior photo, and both planned
+chairs appeared, in the beige the plan chose. Stating the copies explicitly
+("show 2 separate, identical copies") fixed the earlier renders that drew one
+chair where two were planned. The same render added a small round side table
+beside the sofa despite the instruction; it is decor-sized, and covered by the
+disclaimer, but it shows the rule is followed closely rather than perfectly.
+
 ## Known limits
 
 **The preview is not guaranteed to be exact.** In one render of a two-chair plan

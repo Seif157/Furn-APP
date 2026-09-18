@@ -10,6 +10,7 @@ the customer ruled out.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from decimal import Decimal
 
 from pydantic import ValidationError
 
@@ -35,6 +36,7 @@ from app.search.models import (
     MAX_PRICE,
     MAX_TERMS,
     HardConstraints,
+    QueryText,
     SoftPreferences,
     SpecificationField,
     UnresolvedTerm,
@@ -72,16 +74,77 @@ def _normalized(values: Iterable[str]) -> tuple[str, ...]:
     ]
 
 
+def _checked_budget(value: Decimal | None) -> Decimal | None:
+    """A stated budget must be usable, or the whole draft is refused.
+
+    Dropping an unusable one would plan as if no limit had been stated, and
+    show the customer a room they ruled out.
+    """
+
+    if value is None:
+        return None
+    if not value.is_finite() or value <= 0 or value > MAX_PRICE:
+        raise RoomDraftError
+    # A model may answer 12000.0; a customer reads "12000".
+    return value.quantize(Decimal(1)) if value == value.to_integral_value() else value
+
+
+# Count words say how many, not which one. Left in the scoring query, "two
+# chairs" matched a sofa described as "two-seat" and let it tie with the modern
+# sofa the customer asked for. Normalized forms.
+COUNT_WORDS = frozenset(
+    {
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+        "pair",
+        "couple",
+        "single",
+        "واحد",
+        "واحده",
+        "اتنين",
+        "اثنين",
+        "تنين",
+        "تلاته",
+        "ثلاثه",
+        "تلات",
+        "اربعه",
+        "اربع",
+        "خمسه",
+        "خمس",
+        "سته",
+        "ست",
+        "سبعه",
+        "تمانيه",
+        "تسعه",
+        "عشره",
+        "جوز",
+    }
+)
+
+
+def _scoring_query(text: str) -> QueryText:
+    kept = " ".join(
+        word
+        for word in text.split()
+        if normalize_text(word.strip(".,،:;!?")) not in COUNT_WORDS
+    )
+    return query_text(kept or text)
+
+
 def specification_from_room_draft(draft: RoomDraft, *, query: str) -> RoomSpecification:
     """Resolve a room draft into slots, merging repeated kinds of furniture."""
 
     unresolved: list[UnresolvedTerm] = []
 
-    budget = draft.max_budget
-    if budget is not None and (
-        not budget.is_finite() or budget <= 0 or budget > MAX_PRICE
-    ):
-        raise RoomDraftError
+    budget = _checked_budget(draft.max_budget)
 
     room_colours = _resolve(
         COLOURS,
@@ -95,7 +158,7 @@ def specification_from_room_draft(draft: RoomDraft, *, query: str) -> RoomSpecif
     # Merged by resolved category, so "a chair ... and another chair" is one
     # slot of two. Two slots of the same category could otherwise pick two
     # different chairs for what the customer meant as a matching pair.
-    merged: dict[str, tuple[int, list[str], list[str]]] = {}
+    merged: dict[str, tuple[int, list[str], list[str], list[Decimal | None]]] = {}
     for item in draft.items:
         surface = (item.category or "").strip()
         if not surface:
@@ -110,16 +173,27 @@ def specification_from_room_draft(draft: RoomDraft, *, query: str) -> RoomSpecif
         colours = _resolve(
             COLOURS, item.colours, field="preferred_colours", unresolved=unresolved
         )
-        quantity, known_materials, known_colours = merged.get(term.slug, (0, [], []))
+        quantity, known_materials, known_colours, budgets = merged.get(
+            term.slug, (0, [], [], [])
+        )
         merged[term.slug] = (
             quantity + item.quantity,
             [*known_materials, *(m for m in materials if m not in known_materials)],
             [*known_colours, *(c for c in colours if c not in known_colours)],
+            [*budgets, _checked_budget(item.max_budget)],
         )
 
     slots: list[RoomSlot] = []
     try:
-        for slug, (quantity, materials, colours) in merged.items():
+        for slug, (quantity, materials, colours, budgets) in merged.items():
+            # Merged lines add their budgets only when every part had one. If
+            # one mention had a budget and another did not, the limit for the
+            # combined line is unknown, so none is invented.
+            line_budget = (
+                sum(budgets, Decimal("0"))
+                if budgets and all(b is not None for b in budgets)
+                else None
+            )
             if quantity > MAX_QUANTITY:
                 raise RoomDraftError
             slot_colours = tuple(dict.fromkeys([*colours, *room_colours]))[:MAX_TERMS]
@@ -137,6 +211,7 @@ def specification_from_room_draft(draft: RoomDraft, *, query: str) -> RoomSpecif
                         styles=styles,
                         room_type=room_type,
                     ),
+                    budget=line_budget,
                 )
             )
     except ValidationError:
@@ -151,6 +226,7 @@ def specification_from_room_draft(draft: RoomDraft, *, query: str) -> RoomSpecif
         slots=tuple(slots),
         budget=budget,
         query=query_text(query),
+        scoring_query=_scoring_query(query),
         language=detect_language(query),
         styles=styles,
         room_type=room_type,

@@ -20,7 +20,8 @@ from app.catalog.upstream_models import UpstreamProduct
 from app.recommendations.explanations import format_money, match_reasons
 from app.recommendations.models import ReasonResponse
 from app.rooms.models import MAX_ITEMS, MAX_QUANTITY, RoomSpecification
-from app.rooms.planner import RoomPlan, UnfilledReason
+from app.rooms.planner import PlannedItem, RoomPlan, UnfilledReason
+from app.rooms.upgrades import upgrade_reasons, upgrade_summary
 from app.search.localization import response_language, term_label
 from app.search.models import Language
 from app.search.responses import TermResponse, UnresolvedResponse
@@ -39,6 +40,17 @@ UNFILLED_TEXT: dict[UnfilledReason, dict[str, str]] = {
         "ar": "الكمية المطلوبة مش متوفرة بلون واحد",
     },
 }
+BUDGET_QUESTION = {
+    "en": (
+        "Would you like to set a budget for the whole room, or for each piece? "
+        "We will pick the best match within it and point out anything better "
+        "for a little more."
+    ),
+    "ar": (
+        "تحب تحدد ميزانية للأوضة كلها أو لكل قطعة؟ هنختارلك أنسب حاجة في "
+        "حدودها ونقولك لو فيه حاجة أحسن بفرق بسيط."
+    ),
+}
 PREVIEW_LABEL = {
     "en": "AI preview",
     "ar": "معاينة بالذكاء الاصطناعي",
@@ -46,34 +58,15 @@ PREVIEW_LABEL = {
 PREVIEW_DISCLAIMER = {
     "en": (
         "An illustration generated from the product photos. Details and "
-        "proportions may differ from the real products; the product photos "
-        "and listings are what you are buying."
+        "proportions may differ from the real products, and the decor is for "
+        "illustration only. The listed products are what you are buying."
     ),
     "ar": (
         "صورة توضيحية متولدة من صور المنتجات. التفاصيل والمقاسات ممكن تختلف "
-        "عن المنتجات الحقيقية، والمنتجات بصورها ومواصفاتها هي اللي بتشتريها."
+        "عن المنتجات الحقيقية، والديكور والإكسسوارات للتوضيح بس. المنتجات "
+        "اللي في القائمة هي اللي بتشتريها."
     ),
 }
-
-
-class RoomItemResponse(StrictResponseModel):
-    requested: TermResponse
-    """The kind of furniture the customer asked for."""
-    product: ProductResponse
-    quantity: int
-    unit_price: Decimal
-    """What one costs the customer: the discount price when there is one."""
-    line_total: Decimal
-    colour: str
-    """The catalogue colour to order, chosen because it has enough stock."""
-    reasons: tuple[ReasonResponse, ...]
-
-
-class UnfilledResponse(StrictResponseModel):
-    requested: TermResponse
-    quantity: int
-    reason: str
-    text: str
 
 
 class _RequestModel(BaseModel):
@@ -105,6 +98,56 @@ class RoomImageRequest(_RequestModel):
     language: Literal["ar", "en"] = "en"
 
 
+class UpgradeResponse(StrictResponseModel):
+    """A better-matching option for one line, for a little more money.
+
+    Offered only when it scores higher on what the customer asked for, and
+    costs at most 15% past the budget it would exceed. ``reasons`` say exactly
+    what it matches that the current pick does not; nothing here claims a
+    product is nicer or of higher quality.
+    """
+
+    product: ProductResponse
+    unit_price: Decimal
+    line_total: Decimal
+    extra_cost: Decimal
+    colour: str
+    room_total: Decimal
+    """The room's total if this upgrade is taken and nothing else changes."""
+    within_room_budget: bool | None
+    """None when the customer set no budget for the room."""
+    over_item_budget_by: Decimal | None
+    reasons: tuple[ReasonResponse, ...]
+    summary: str
+    """One sentence to show as is, in the customer's language."""
+    image_item: RoomImageItem
+    """Swap this into image_request to preview the room with the upgrade."""
+
+
+class RoomItemResponse(StrictResponseModel):
+    requested: TermResponse
+    """The kind of furniture the customer asked for."""
+    product: ProductResponse
+    quantity: int
+    unit_price: Decimal
+    """What one costs the customer: the discount price when there is one."""
+    line_total: Decimal
+    budget: Decimal | None
+    """The budget the customer set for this line, all units together."""
+    over_budget_by: Decimal | None
+    colour: str
+    """The catalogue colour to order, chosen because it has enough stock."""
+    reasons: tuple[ReasonResponse, ...]
+    upgrades: tuple[UpgradeResponse, ...]
+
+
+class UnfilledResponse(StrictResponseModel):
+    requested: TermResponse
+    quantity: int
+    reason: str
+    text: str
+
+
 class RoomPlanResponse(StrictResponseModel):
     query: str
     language: str
@@ -112,10 +155,16 @@ class RoomPlanResponse(StrictResponseModel):
     total: Decimal
     budget: Decimal | None
     within_budget: bool
+    """The room's total against the room's budget."""
+    every_line_within_budget: bool
+    """Every line against the budget the customer set for it, if any."""
     remaining: Decimal | None
     over_budget_by: Decimal | None
     summary: str
     """One sentence stating the total against the budget, in their language."""
+    budget_question: str | None
+    """Asked when the customer gave no budget at all. Not blocking: the plan
+    is complete, this invites a budget so upgrades can be suggested."""
     unfilled: tuple[UnfilledResponse, ...]
     unresolved: tuple[UnresolvedResponse, ...]
     clarification: str | None
@@ -149,24 +198,88 @@ def _summary(plan: RoomPlan, language: Language) -> str:
             else "No pieces in stock match this room."
         )
     if plan.budget is None:
-        return (
+        sentence = (
             f"{pieces} قطع بإجمالي {total}"
             if arabic
             else f"{pieces} pieces for {total} in total"
         )
-    budget = format_money(plan.budget, language)
-    if plan.within_budget:
-        return (
+    elif plan.within_budget:
+        budget = format_money(plan.budget, language)
+        sentence = (
             f"{pieces} قطع بإجمالي {total}، في حدود ميزانيتك {budget}"
             if arabic
             else f"{pieces} pieces for {total}, within your {budget} budget"
         )
-    over = format_money(plan.total - plan.budget, language)
-    return (
-        f"أرخص اختيار متاح بإجمالي {total}، أكتر من ميزانيتك بـ {over}"
-        if arabic
-        else f"The cheapest available room is {total}, {over} over your budget"
-    )
+    else:
+        over = format_money(plan.total - plan.budget, language)
+        sentence = (
+            f"أقرب اختيار لميزانيتك بإجمالي {total}، أكتر منها بـ {over}"
+            if arabic
+            else f"The closest room to your budget is {total}, {over} over your budget"
+        )
+    if not plan.every_line_within_budget:
+        sentence += (
+            "، وفيه قطع أغلى من الميزانية اللي حددتها ليها"
+            if arabic
+            else ", and some pieces cost more than the budget you set for them"
+        )
+    return sentence
+
+
+def _upgrade_responses(
+    planned: PlannedItem,
+    *,
+    by_id: dict,
+    plan: RoomPlan,
+    specification: RoomSpecification,
+) -> tuple[UpgradeResponse, ...]:
+    language = specification.language
+    found: list[UpgradeResponse] = []
+    for upgrade in planned.upgrades:
+        product = by_id.get(upgrade.candidate.product.id)
+        shown = build_product_response(product) if product is not None else None
+        if shown is None:
+            continue
+        reasons = upgrade_reasons(
+            planned.candidate,
+            upgrade.candidate,
+            slot=planned.slot,
+            query=specification.scoring_query,
+            language=language,
+        )
+        line = upgrade.candidate.product.effective_price * planned.slot.quantity
+        found.append(
+            UpgradeResponse(
+                product=shown,
+                unit_price=upgrade.candidate.product.effective_price,
+                line_total=line,
+                extra_cost=upgrade.extra,
+                colour=upgrade.candidate.colour.original,
+                room_total=upgrade.room_total,
+                within_room_budget=(
+                    None if plan.budget is None else upgrade.room_total <= plan.budget
+                ),
+                over_item_budget_by=(
+                    line - planned.slot.budget
+                    if planned.slot.budget is not None and line > planned.slot.budget
+                    else None
+                ),
+                reasons=reasons,
+                summary=upgrade_summary(
+                    upgrade,
+                    slot=planned.slot,
+                    room_budget=plan.budget,
+                    reasons=reasons,
+                    language=language,
+                ),
+                image_item=RoomImageItem(
+                    product_id=upgrade.candidate.product.id,
+                    quantity=planned.slot.quantity,
+                    colour_id=upgrade.candidate.colour.id,
+                ),
+            )
+        )
+    return tuple(found)
 
 
 def build_room_plan_response(
@@ -193,9 +306,14 @@ def build_room_plan_response(
                 quantity=planned.slot.quantity,
                 unit_price=planned.candidate.product.effective_price,
                 line_total=planned.line_total,
+                budget=planned.slot.budget,
+                over_budget_by=planned.over_budget_by,
                 colour=planned.candidate.colour.original,
                 reasons=match_reasons(
                     planned.candidate.checks, planned.slot.hard, language
+                ),
+                upgrades=_upgrade_responses(
+                    planned, by_id=by_id, plan=plan, specification=specification
                 ),
             )
         )
@@ -219,6 +337,9 @@ def build_room_plan_response(
         plan.budget - plan.total
         if plan.budget is not None and plan.within_budget
         else None
+    )
+    no_budget_given = plan.budget is None and all(
+        slot.budget is None for slot in specification.slots
     )
     image_request = (
         RoomImageRequest(
@@ -244,9 +365,13 @@ def build_room_plan_response(
         total=plan.total,
         budget=plan.budget,
         within_budget=plan.within_budget,
+        every_line_within_budget=plan.every_line_within_budget,
         remaining=remaining,
         over_budget_by=over,
         summary=_summary(plan, language),
+        budget_question=(
+            BUDGET_QUESTION[lang] if no_budget_given and specification.slots else None
+        ),
         unfilled=unfilled,
         unresolved=tuple(
             UnresolvedResponse(field=term.field, surface=term.surface)
