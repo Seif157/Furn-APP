@@ -38,6 +38,10 @@ select = ["E", "F", "I", "UP", "B"]
 "tests/phase_3_2d_package.py" = ["E501"]
 # The seed catalogue is a data table; one product per line keeps it reviewable.
 "tests/seed_catalogue.py" = ["E501"]
+# SQL text inside the undo-snapshot builder and the replica tests keeps the
+# layout PostgreSQL will run; wrapping it would change the queries.
+"scripts/build_32d_undo_snapshot.py" = ["E501"]
+"scripts/replica_*.py" = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"

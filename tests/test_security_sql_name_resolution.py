@@ -23,11 +23,13 @@ UNQUALIFIED_RELATION = re.compile(r"'([a-z_][a-z0-9_]*)'::(?:pg_catalog\.)?regcl
 STRING_LITERAL = re.compile(r"'(?:[^']|'')*'")
 
 
+MIGRATIONS_DIR = SQL_DIR.parent / "migrations"
+
+
 def narrowed_files() -> list[Path]:
+    candidates = [*SQL_DIR.glob("phase-3.2*.sql"), *MIGRATIONS_DIR.glob("*.sql")]
     return sorted(
-        path
-        for path in SQL_DIR.glob("phase-3.2*.sql")
-        if NARROWED.search(path.read_text(encoding="utf-8"))
+        path for path in candidates if NARROWED.search(path.read_text(encoding="utf-8"))
     )
 
 
@@ -38,6 +40,7 @@ def test_the_files_that_narrow_lookup_are_found() -> None:
         "phase-3.2c-security-hardening-preflight.sql",
         "phase-3.2d-security-hardening.sql",
         "phase-3.2d-security-hardening-preflight.sql",
+        "checkout-2026-09-18.sql",
     } <= names
 
 
@@ -47,7 +50,12 @@ def test_no_unqualified_relation_literal(path: Path) -> None:
     assert found == [], f"qualify with public.: {found}"
 
 
-SECURITY_SQL = sorted(SQL_DIR.glob("phase-3.2[bcd]-security-hardening*.sql"))
+SECURITY_SQL = sorted(
+    [
+        *SQL_DIR.glob("phase-3.2[bcd]-security-hardening*.sql"),
+        *MIGRATIONS_DIR.glob("*.sql"),
+    ]
+)
 
 # SQL-standard spellings that PostgreSQL accepts only unqualified. Qualified,
 # the real names are bool, int4, int2, int8, float4, float8 and numeric, so

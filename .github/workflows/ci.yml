@@ -40,6 +40,28 @@ jobs:
       - name: Whitespace
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
 
+  replica:
+    # Executes the checkout migration and the 3.2D undo round trip against a
+    # real, throwaway PostgreSQL rebuilt from the recorded live schema. Static
+    # tests cannot catch SQL that only fails when it runs; these do.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Checkout migration on a replica
+        run: >
+          uv run --no-project --python 3.12 --with pgserver
+          --with "psycopg[binary]" python scripts/replica_checkout_test.py
+
+      - name: 3.2D undo round trip on a replica
+        run: >
+          uv run --no-project --python 3.12 --with pgserver
+          --with "psycopg[binary]" --with pglast
+          python scripts/replica_undo_32d_test.py
+
   image:
     # Builds the production image and proves it starts and answers /health.
     # The values below are syntactically valid placeholders, not credentials:
