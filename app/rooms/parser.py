@@ -9,14 +9,14 @@ the customer ruled out.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from decimal import Decimal
 
 from pydantic import ValidationError
 
 from app.ai.guardrails import RequirementDraftError
 from app.ai.provider import AIProvider
-from app.ai.service import validate_query
+from app.ai.service import conversation
 from app.catalog.normalization import (
     CATEGORIES,
     COLOURS,
@@ -235,18 +235,24 @@ def specification_from_room_draft(draft: RoomDraft, *, query: str) -> RoomSpecif
     )
 
 
-async def parse_room_request(text: str, *, provider: AIProvider) -> RoomSpecification:
-    """Parse one room sentence. Raises the same errors as search parsing."""
+async def parse_room_request(
+    text: str, *, provider: AIProvider, history: Sequence[str] = ()
+) -> RoomSpecification:
+    """Parse one room sentence, optionally refining earlier ones.
 
-    query = validate_query(text)
+    Raises the same errors as search parsing. With no history the model gets
+    exactly the instruction and prompt it always did.
+    """
+
+    turn = conversation(ROOM_INSTRUCTION, text, history)
     raw = await provider.generate_json(
-        instruction=ROOM_INSTRUCTION, prompt=query, schema=ROOM_SCHEMA
+        instruction=turn.instruction, prompt=turn.prompt, schema=ROOM_SCHEMA
     )
     try:
         draft = RoomDraft.model_validate(dict(raw))
     except ValidationError:
         raise RoomDraftError from None
-    return specification_from_room_draft(draft, query=query)
+    return specification_from_room_draft(draft, query=turn.query)
 
 
 __all__ = [

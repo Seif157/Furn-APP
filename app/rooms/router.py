@@ -27,7 +27,7 @@ from app.ai.provider import (
     AIProviderUnavailableError,
     ImageBytes,
 )
-from app.ai.service import InvalidQueryError
+from app.ai.service import MAX_HISTORY, InvalidQueryError
 from app.auth.dependencies import get_authenticated_request
 from app.auth.models import AuthenticatedRequestContext
 from app.catalog.dependencies import (
@@ -75,6 +75,12 @@ class RoomPlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     query: Annotated[str, Field(min_length=1, max_length=MAX_TEXT_LENGTH)]
+    history: Annotated[
+        list[Annotated[str, Field(min_length=1, max_length=MAX_TEXT_LENGTH)]],
+        Field(max_length=MAX_HISTORY),
+    ] = []
+    """Earlier messages about this room, oldest first, so "make the sofa grey"
+    or "raise the budget to 50 thousand" refines the plan already shown."""
 
 
 async def get_reference_fetcher(request: Request) -> ReferenceImageFetcher | None:
@@ -99,7 +105,7 @@ async def plan(
 ) -> RoomPlanResponse:
     """Plan a room of real products from one sentence."""
 
-    language = detect_language(plan_request.query)
+    language = detect_language(" ".join([*plan_request.history, plan_request.query]))
     if provider is None:
         raise search_unavailable(language)
     enforce_rate_limit(
@@ -110,14 +116,19 @@ async def plan(
     )
 
     caches = get_ai_caches(request)
-    key = cache_key("room", plan_request.query)
+    key = cache_key(
+        "room",
+        str(len(plan_request.history)),
+        *plan_request.history,
+        plan_request.query,
+    )
     try:
         cached = caches.parses.get(key) if caches is not None else None
         if isinstance(cached, RoomSpecification):
             specification = cached
         else:
             specification = await parse_room_request(
-                plan_request.query, provider=provider
+                plan_request.query, provider=provider, history=plan_request.history
             )
             if caches is not None:
                 caches.parses.put(key, specification)

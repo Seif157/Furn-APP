@@ -26,7 +26,7 @@ from app.ai.provider import (
     AIProviderError,
     AIProviderUnavailableError,
 )
-from app.ai.service import InvalidQueryError, parse_requirements
+from app.ai.service import MAX_HISTORY, InvalidQueryError, parse_requirements
 from app.auth.dependencies import get_authenticated_request
 from app.auth.models import AuthenticatedRequestContext
 from app.catalog.dependencies import (
@@ -78,6 +78,13 @@ class SearchRequest(BaseModel):
 
     query: Annotated[str, Field(min_length=1, max_length=MAX_TEXT_LENGTH)]
     limit: Annotated[int, Field(ge=1, le=MAX_RESULTS)] = DEFAULT_RESULTS
+    history: Annotated[
+        list[Annotated[str, Field(min_length=1, max_length=MAX_TEXT_LENGTH)]],
+        Field(max_length=MAX_HISTORY),
+    ] = []
+    """The customer's earlier messages in this conversation, oldest first.
+    With history, "in grey instead" refines the earlier search rather than
+    starting over. The app keeps the list; the server keeps nothing."""
 
 
 @router.post("", response_model=SearchResponse)
@@ -96,7 +103,9 @@ async def search(
     # Detected from the raw sentence rather than from the parsed specification,
     # so a failure before or during parsing can still be reported in the
     # customer's own language.
-    language = detect_language(search_request.query)
+    language = detect_language(
+        " ".join([*search_request.history, search_request.query])
+    )
     if provider is None:
         raise search_unavailable(language)
     enforce_rate_limit(
@@ -107,14 +116,23 @@ async def search(
     )
 
     caches = get_ai_caches(request)
-    key = cache_key("search", str(search_request.limit), search_request.query)
+    key = cache_key(
+        "search",
+        str(search_request.limit),
+        str(len(search_request.history)),
+        *search_request.history,
+        search_request.query,
+    )
     try:
         cached = caches.parses.get(key) if caches is not None else None
         if isinstance(cached, ParsedRequirements):
             parsed = cached
         else:
             parsed = await parse_requirements(
-                search_request.query, provider=provider, limit=search_request.limit
+                search_request.query,
+                provider=provider,
+                limit=search_request.limit,
+                history=search_request.history,
             )
             if caches is not None:
                 caches.parses.put(key, parsed)
