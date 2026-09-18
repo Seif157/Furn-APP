@@ -56,6 +56,11 @@ jobs:
           uv run --no-project --python 3.12 --with pgserver
           --with "psycopg[binary]" python scripts/replica_checkout_test.py
 
+      - name: Design-version links on a replica
+        run: >
+          uv run --no-project --python 3.12 --with pgserver
+          --with "psycopg[binary]" python scripts/replica_design_links_test.py
+
       - name: 3.2D undo round trip on a replica
         run: >
           uv run --no-project --python 3.12 --with pgserver
