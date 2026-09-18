@@ -129,7 +129,8 @@ Current status:
 Phase 3.2B migration:    APPLIED LIVE (found applied 2026-09-18); verification 13/13
 Phase 3.2C migration:    APPLIED LIVE 2026-09-18 from commit a34159d; verification 20/20
 Phase 3.2C undo:         rollback/phase-3.2c-undo-2026-09-18.sql (not run)
-Phase 3.2D migration:    NOT EXECUTED, held (see below)
+Phase 3.2D preflight:    PASSED live 2026-09-18 (after fixing bug 9, commit b65dd89)
+Phase 3.2D migration:    NOT EXECUTED, held until Flutter is ready (see below)
 Live acceptance:         NOT EXECUTED (3.2C utility needs fixture accounts)
 Approval:                3.2C applied at the user's decision without an independent
                          security review; 3.2D still requires human review

@@ -220,3 +220,28 @@ sections passed. Until then, CLAUDE.md keeps reporting it as not executed.
   UPDATE, DELETE, TRUNCATE, TRIGGER, REFERENCES and MAINTAIN on the
   `order_financial_position` view. 3.2C removes them; the undo would restore
   them, because its job is exact restoration.
+- Server-side cart (`POST /v1/cart`, the 3.2D cart design) built with the
+  Supabase secret key and passed live at 22:54: the first call created
+  customer2's cart, the second returned it.
+
+### 2026-09-18, Phase 3.2D preflight (read-only, always rolls back)
+
+- First run stopped at `Phase 3.2D replaced policy drift`; nothing changed.
+  Bug 9: the check compared the 13 replaced policies' text exactly with text
+  recorded in the SQL Editor, but the preflight narrows the search path, so
+  the same policies print `public.current_customer_profile_id()` and
+  `FROM public.cart`. A read-only diagnostic running the identical comparison
+  in the SQL Editor returned no rows: every policy matched apart from the
+  qualifier. The comparison now strips `public.` first (commit `b65dd89`),
+  as the column check already did for defaults.
+- **Second run: Success. No rows returned.** The live database matches
+  everything 3.2D expects: 3.2C applied, helpers, the 18 FOR ALL policies,
+  the 13 replaced policies, the 104-column inventory, the 312-row privilege
+  baseline, constraints and enum labels.
+- **3.2D is NOT applied.** Before it is: Flutter must call `POST /v1/cart`
+  instead of inserting carts, use `advance_purchase_order` /
+  `cancel_purchase_order` for order status and the four service-request
+  functions, and stop editing or deleting reviews. Then, as for 3.2C: take an
+  undo snapshot of everything 3.2D changes, run the migration, run its 12
+  verification sections, run the smoke test, and run
+  `scripts/live_phase_3_2d_acceptance.py`.
