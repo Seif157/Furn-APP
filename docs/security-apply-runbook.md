@@ -186,6 +186,23 @@ sections passed. Until then, CLAUDE.md keeps reporting it as not executed.
   (two places) and the 3.2D generator. The migration's granted columns were
   also checked mechanically against the postflight's expected columns: 10
   for INSERT and 9 for UPDATE, identical.
+- **3.2C migration, third live run: applied.** "Success. No rows returned",
+  committed with every postflight check passing. The file run was commit
+  `a34159d` (sha256 of the CRLF checkout `8b04c44d…`).
+- 3.2C verification, first run (all 20 sections in one read-only query): 18
+  passed. Two failed on bugs in the verification file, each confirmed against
+  live data with a read-only diagnostic before any change:
+  7. Section 11 required `public.address` in policy text. The migration's
+     postflight ran with `search_path = pg_catalog` and saw the qualified
+     name; the SQL Editor has `public` on its path, so pg_policies prints
+     `address`. The live policies are exactly right (draft-only insert on an
+     owned address, update and delete only while draft or open). The check
+     now accepts either spelling and still requires the `address` table under
+     the alias `request_address`.
+  8. Section 20 counted the storage owner's own default privileges (12 rows,
+     all `postgres`, none grantable) as unexpected. The 3.2B check that
+     passed live excludes them with `acl.grantee <> defaclrole`; this copy did
+     not. 3.2C does not touch storage.
 - The snapshot shows that before 3.2C, anon and authenticated held INSERT,
   UPDATE, DELETE, TRUNCATE, TRIGGER, REFERENCES and MAINTAIN on the
   `order_financial_position` view. 3.2C removes them; the undo would restore

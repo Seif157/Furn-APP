@@ -93,7 +93,24 @@ def test_aclexplode_is_never_given_a_standalone_empty_array(path: Path) -> None:
     assert STANDALONE_EMPTY_ACL.findall(path.read_text(encoding="utf-8")) == []
 
 
+# Verification files run in the SQL Editor, where public is on the search path,
+# so pg_policies prints `address`, not `public.address`. A check that requires
+# the qualified spelling in policy text fails on a correct policy; this is what
+# failed section 11 of the first live 3.2C verification.
+QUALIFIED_POLICY_TEXT = re.compile(r"(?:qual|with_check)\s+LIKE\s+'%public\.")
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(SQL_DIR.glob("phase-3.2[cd]-security-hardening-verify.sql")),
+    ids=lambda path: path.name,
+)
+def test_verification_does_not_require_qualified_policy_text(path: Path) -> None:
+    assert QUALIFIED_POLICY_TEXT.findall(path.read_text(encoding="utf-8")) == []
+
+
 def test_the_check_would_catch_the_original_bug() -> None:
+    assert QUALIFIED_POLICY_TEXT.search("AND with_check LIKE '%public.address%'")
     assert STANDALONE_EMPTY_ACL.search(
         "pg_catalog.aclexplode(\n    COALESCE(attribute.attacl, "
         "ARRAY[]::pg_catalog.aclitem[])\n) AS acl"

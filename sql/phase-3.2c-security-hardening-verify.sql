@@ -536,7 +536,7 @@ comparison AS (
                     '%customer_profile_id%current_customer_profile_id%'
                 AND with_check LIKE
                     '%lifecycle_state%draft%furnishing_request_state%'
-                AND with_check LIKE '%public.address%'
+                AND with_check ~ '(^|[^a-z0-9_.])(public\.)?address request_address'
                 AND with_check LIKE '%request_address.id%address_id%'
                 AND with_check LIKE
                     '%request_address.customer_profile_id%current_customer_profile_id%'
@@ -550,7 +550,7 @@ comparison AS (
                     '%customer_profile_id%current_customer_profile_id%'
                 AND with_check LIKE '%lifecycle_state%draft%'
                 AND with_check LIKE '%lifecycle_state%open%'
-                AND with_check LIKE '%public.address%'
+                AND with_check ~ '(^|[^a-z0-9_.])(public\.)?address request_address'
                 AND with_check LIKE '%request_address.id%address_id%'
                 AND with_check LIKE
                     '%request_address.customer_profile_id%current_customer_profile_id%'
@@ -1259,6 +1259,9 @@ actual_signature AS (
     ) AS acl
     WHERE owner_role.rolname = 'postgres'
       AND namespace.nspname = 'storage'
+      -- The owner's own privileges are not grants to anyone; the applied
+      -- 3.2B check excludes them the same way.
+      AND acl.grantee <> default_acl.defaclrole
 ),
 missing AS (
     SELECT * FROM expected_signature

@@ -55,7 +55,11 @@ PRESERVED_DIGESTS = {
         "97054ae7eb8d57df6798915166db71853b2092ecedd5bfbceae25f27a9c6f02c"
     ),
     SQL_DIR / "phase-3.2c-security-hardening-verify.sql": (
-        "384966e66f108141fd33c63508aac6833b19491b57f52985ad6728add57b673f"
+        # Verification sections 11 and 20 fixed after the first live
+        # verification: policy text printed without public. in the SQL
+        # Editor, and the storage owner's own default privileges, which the
+        # applied 3.2B check already excludes.
+        "d248d824fb917855fa0d652963da65f48cfc867356ee09bb170b7c1acac238ea"
     ),
     SQL_DIR / "phase-3.2c-rls-policy-audit.sql": (
         "3e3d0f36e3482877bc02c8ead12ea2ceda402c9838966e45b1324b4bed1e3e98"
