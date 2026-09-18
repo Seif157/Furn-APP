@@ -10,6 +10,7 @@ missing compared with the running server is the network socket.
     uv run python -m scripts.live_search_smoke            # search + room plan
     uv run python -m scripts.live_search_smoke --render   # also the preview image
     uv run python -m scripts.live_search_smoke --cart     # also create/fetch the cart
+    uv run python -m scripts.live_search_smoke --checkout # also order one item, cancel
 
 It asks for an email and a password in your terminal. The password is read
 without echo, and neither it nor the session token is ever printed, logged, or
@@ -103,7 +104,7 @@ def show_search(sentence: str, response: httpx.Response) -> bool:
     return True
 
 
-async def run(*, render: bool, skip_rooms: bool, cart: bool) -> int:
+async def run(*, render: bool, skip_rooms: bool, cart: bool, checkout: bool) -> int:
     try:
         settings = load_settings()
     except RuntimeError:
@@ -163,6 +164,9 @@ async def run(*, render: bool, skip_rooms: bool, cart: bool) -> int:
             if ok and cart:
                 ok = await check_cart(client, headers) and ok
 
+            if ok and checkout:
+                ok = await check_checkout(client, headers, settings) and ok
+
             if ok and not skip_rooms:
                 ok = await check_room(client, headers, render=render) and ok
 
@@ -171,12 +175,115 @@ async def run(*, render: bool, skip_rooms: bool, cart: bool) -> int:
     checked = "search, follow-ups, compare, similar, public reviews"
     if cart:
         checked += ", the cart"
+    if checkout:
+        checked += ", checkout and cancellation"
     if not skip_rooms:
         checked += " and room planning"
     print(
         f"\nPASSED: {checked} work with a real signed-in session." if ok else "\nFAILED"
     )
     return 0 if ok else 1
+
+
+async def check_checkout(
+    client: httpx.AsyncClient, headers: dict[str, str], settings
+) -> bool:
+    """Place a one-item order as the app will (Supabase RPC with the customer's
+    own token), then cancel it and require the stock to come back."""
+
+    print("\ncheckout: one item, place_order, then cancel_purchase_order")
+    rest = f"{str(settings.supabase_url).rstrip('/')}/rest/v1"
+    supabase = {
+        **headers,
+        "apikey": settings.supabase_publishable_key.get_secret_value(),
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=30) as db:
+        cart_id = (await client.post("/v1/cart", headers=headers)).json()["cart_id"]
+        lines = await db.get(
+            f"{rest}/cart_line",
+            params={"select": "id", "cart_id": f"eq.{cart_id}"},
+            headers=supabase,
+        )
+        if lines.status_code != 200 or lines.json():
+            print(
+                "  FAILED  the cart is not empty; empty it first so nothing "
+                "unintended is ordered"
+            )
+            return False
+        addresses = await db.get(
+            f"{rest}/address", params={"select": "id", "limit": "1"}, headers=supabase
+        )
+        if addresses.status_code != 200 or not addresses.json():
+            print("  FAILED  this account has no address; add one in the app first")
+            return False
+        address_id = addresses.json()[0]["id"]
+
+        listing = await client.get("/v1/catalog/products?limit=50", headers=headers)
+        choice = next(
+            (
+                (product["name"], colour["id"])
+                for product in listing.json()["items"]
+                for colour in product["colors"]
+                if colour["stock_quantity"] >= 2
+            ),
+            None,
+        )
+        if choice is None:
+            print("  FAILED  no product colour with stock to test with")
+            return False
+        name, colour_id = choice
+
+        async def stock() -> int:
+            response = await db.get(
+                f"{rest}/product_color",
+                params={"select": "stock_quantity", "id": f"eq.{colour_id}"},
+                headers=supabase,
+            )
+            return response.json()[0]["stock_quantity"]
+
+        before = await stock()
+        added = await db.post(
+            f"{rest}/cart_line",
+            json={"cart_id": cart_id, "product_color_id": colour_id, "quantity": 1},
+            headers={**supabase, "Prefer": "return=minimal"},
+        )
+        if added.status_code not in (200, 201):
+            print(f"  FAILED  adding to cart: HTTP {added.status_code} {added.text}")
+            return False
+        placed = await db.post(
+            f"{rest}/rpc/place_order", json={"address_id": address_id}, headers=supabase
+        )
+        if placed.status_code != 200:
+            print(f"  FAILED  place_order: HTTP {placed.status_code} {placed.text}")
+            return False
+        orders = placed.json()
+        after_order = await stock()
+        print(
+            f"  ok  placed {len(orders)} order(s) for 1 x {name}; "
+            f"stock {before} -> {after_order}"
+        )
+        cancelled = [
+            (
+                await db.post(
+                    f"{rest}/rpc/cancel_purchase_order",
+                    json={"order_id": order["order_id"]},
+                    headers=supabase,
+                )
+            ).json()
+            for order in orders
+        ]
+        after_cancel = await stock()
+        print(f"  ok  cancelled: {cancelled}; stock {after_order} -> {after_cancel}")
+    good = (
+        len(orders) == 1
+        and after_order == before - 1
+        and cancelled == [True]
+        and after_cancel == before
+    )
+    if not good:
+        print("  FAILED  expected one order, stock down by 1, then back after cancel")
+    return good
 
 
 async def check_cart(client: httpx.AsyncClient, headers: dict[str, str]) -> bool:
@@ -338,13 +445,21 @@ def main() -> int:
         help="Also call POST /v1/cart twice. Creates this account's one empty "
         "cart if it has none: a real write.",
     )
+    parser.add_argument(
+        "--checkout",
+        action="store_true",
+        help="Also place a real one-item order with place_order, then cancel it "
+        "and check the stock came back. Real writes: a cancelled order stays on "
+        "record. Refuses if the cart is not empty.",
+    )
     arguments = parser.parse_args()
     try:
         return asyncio.run(
             run(
                 render=arguments.render,
                 skip_rooms=arguments.skip_rooms,
-                cart=arguments.cart,
+                cart=arguments.cart or arguments.checkout,
+                checkout=arguments.checkout,
             )
         )
     except KeyboardInterrupt:
