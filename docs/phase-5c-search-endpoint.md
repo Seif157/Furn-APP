@@ -128,9 +128,10 @@ worse than it is. Fixing it properly means either seeding enrichment attributes
 or skipping components no candidate can satisfy, and the latter is a Phase 6
 ranking change.
 
-**A zero-match search offers no alternatives.** It reports honestly that
-nothing matched and why, which is correct, but suggesting the nearest real
-products is Phase 6.10 and is not built.
+**Resolved since: a zero-match search now offers alternatives.** Phase 6.10
+added up to three nearest real products, each with what it misses by, and a
+real signed-in run on 2026-09-18 returned them in Arabic. See
+docs/phase-6-recommendations.md.
 
 **No caching and no rate limiting.** Every search spends a provider call. That
 is acceptable for a demo and is not acceptable for real traffic.
