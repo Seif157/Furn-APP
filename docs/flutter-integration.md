@@ -226,6 +226,7 @@ insert and update with exactly these keys.
 | `offer_line_item` (seller) | offer_id, line_kind, product_id, item_name, specification, unit_price, quantity, display_order | the same minus offer_id, only while the offer is submitted |
 | `party_capability` (seller) | marketplace_party_id, service_type_id, declared_at | none |
 | `design_product_reference` | design_id, product_id | none |
+| `furnishing_request_design_version` | furnishing_request_id, design_version_id | none |
 
 An address cannot be deleted while an order, service request or furnishing
 request uses it.
@@ -254,11 +255,20 @@ await supabase.rpc('withdraw_furnishing_request', params: {'request_id': id});
 Editing and deleting are allowed only while it is `draft` or `open`, and the
 address must belong to the customer.
 
-**Known gap:** attaching a design version to a furnishing request
-(`furnishing_request_design_version`) cannot be done from the app since 3.2D;
-the design says the server creates it, and that server step is not built yet.
-The app may only delete one while the request is `draft` or `open`. Hide
-"attach a design" until the backend endpoint exists.
+**Attaching a design** to a furnishing request (applied 2026-09-19):
+
+```dart
+await supabase.from('furnishing_request_design_version').insert({
+  'furnishing_request_id': requestId,
+  'design_version_id': versionId,
+});
+```
+
+Allowed only when the request is the customer's own and still `draft` or
+`open`, and the design version belongs to a design the customer created.
+Send exactly these two keys. A link cannot be edited; to change it, delete it
+(allowed while the request is `draft` or `open`) and insert the new one.
+Anything else is refused with a row-level security error.
 
 ### Service directory
 

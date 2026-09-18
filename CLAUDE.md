@@ -70,6 +70,7 @@ Phase 3.2B   Initial Security Hardening            APPLIED LIVE, VERIFICATION PA
 Phase 3.2C   Correction + Reconciliation           APPLIED LIVE 2026-09-18, VERIFICATION PASSED (20/20)
 Phase 3.2D   Deferred-Finding Remediation          APPLIED LIVE 2026-09-18, VERIFICATION PASSED (12/12)
 Checkout     place_order + stock return             APPLIED LIVE 2026-09-18, LIVE-TESTED
+Design links customer-attached design versions      APPLIED LIVE 2026-09-19 (post-3.2D)
 Phase 4A-4D  AI Foundation                         COMMITTED (see section 13)
 Phase 5A     Natural-Language Parser               COMMITTED, LIVE-VERIFIED
 Phase 5C     Search Endpoint POST /v1/search       COMMITTED, LIVE-VERIFIED

@@ -268,6 +268,13 @@ sections passed. Until then, CLAUDE.md keeps reporting it as not executed.
   created, `place_order` ordered one Cairo sofa (stock 8 -> 7),
   `cancel_purchase_order` cancelled it (stock 7 -> 8), and search, follow-ups,
   similar, compare, reviews and room planning all work under 3.2D.
-- Known gap left by 3.2D: the app can no longer insert
-  `furnishing_request_design_version`; the design expects a backend AI step
-  that is not built.
+- Gap left by 3.2D, closed 2026-09-19: the app could no longer insert
+  `furnishing_request_design_version`. The owner confirmed the app creates
+  these links, so `migrations/design-version-links-2026-09-19.sql` grants
+  INSERT on the two link columns with an ownership policy (own request, draft
+  or open; own design). It passed 14 checks on a replica, a live rehearsal,
+  and was **applied** from `42a2191`. Undo:
+  `migrations/design-version-links-2026-09-19-undo.sql`.
+- Consequence for future audits: re-running the 3.2D verification now reports
+  sections 04 (privileges) and 05 (policy inventory) as drift on
+  `furnishing_request_design_version`. That drift is this deliberate change.
