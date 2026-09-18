@@ -207,9 +207,14 @@ sections passed. Until then, CLAUDE.md keeps reporting it as not executed.
   `failed_count` 0 (section 11: 3 of 3; section 20: 36 of 36).
 - Backend check after 3.2C (read-only): `GET /v1/reviews/public` returns 200
   as anon, so the seven-column anon grant works as designed; `/health` 200.
-- Still to do for 3.2C: the signed-in smoke test
-  (`scripts/live_search_smoke.py`), the Flutter walkthrough, and the staged
-  live acceptance utility `scripts/live_phase_3_2c_acceptance.py`, which needs
+- **Signed-in smoke test after 3.2C: PASSED** (2026-09-18 22:02, run by the
+  user as a customer account). Through the real Supabase Auth check and the
+  3.2C policies: Arabic and English search with reasons and nearest
+  alternatives, a conversational follow-up (sofa and 30,000 kept, grey added),
+  `/v1/meta`, anonymous public reviews, similar products, comparison, and a
+  room plan within budget. Real products appear alongside the seed.
+- Still to do for 3.2C: the Flutter walkthrough, and the staged live
+  acceptance utility `scripts/live_phase_3_2c_acceptance.py`, which needs
   fixture accounts and has not been run.
 - The snapshot shows that before 3.2C, anon and authenticated held INSERT,
   UPDATE, DELETE, TRUNCATE, TRIGGER, REFERENCES and MAINTAIN on the

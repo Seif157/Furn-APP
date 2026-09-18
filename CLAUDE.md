@@ -134,6 +134,8 @@ Live acceptance:         NOT EXECUTED (3.2C utility needs fixture accounts)
 Approval:                3.2C applied at the user's decision without an independent
                          security review; 3.2D still requires human review
 Search with a real user session:  PASSED 2026-09-18 (scripts/live_search_smoke.py)
+Smoke test after 3.2C:   PASSED 2026-09-18 22:02 (search, follow-up, meta, public
+                         reviews, similar, compare, room plan; real customer account)
 ```
 
 Applying 3.2C exposed eight bugs in the package, none in the database: six in
