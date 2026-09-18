@@ -21,6 +21,7 @@ from app.reviews.gateway import SupabaseReviewGateway
 from app.reviews.router import router as reviews_router
 from app.rooms.images import ReferenceImageFetcher
 from app.rooms.router import router as rooms_router
+from app.routers.meta import router as meta_router
 from app.routers.users import router as users_router
 from app.search.router import router as search_router
 
@@ -56,6 +57,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # feature.
     ai_settings = load_ai_settings()
     configure_logging(settings.log_level)
+    application.state.ai_settings = ai_settings
     # Cost controls for the paid model calls; see app/core/limits.py and
     # app/core/cache.py.
     application.state.rate_limiter = build_rate_limiter(ai_settings)
@@ -110,6 +112,7 @@ async def get_health() -> HealthResponse:
     )
 
 
+app.include_router(meta_router)
 app.include_router(users_router)
 app.include_router(catalogue_router)
 app.include_router(search_router)
