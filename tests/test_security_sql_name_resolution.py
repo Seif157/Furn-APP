@@ -109,7 +109,27 @@ def test_verification_does_not_require_qualified_policy_text(path: Path) -> None
     assert QUALIFIED_POLICY_TEXT.findall(path.read_text(encoding="utf-8")) == []
 
 
+# The reverse trap: a file that narrows the search path prints policy text with
+# public. qualifiers, while recorded evidence has none. An exact comparison of
+# raw pg_policies text must strip public. first; this stopped the first live
+# 3.2D preflight on 2026-09-18 ("replaced policy drift").
+RAW_POLICY_TEXT_COMPARED = re.compile(
+    r"regexp_replace\(\s*actual\.(?:qual|with_check)\b"
+)
+
+
+@pytest.mark.parametrize("path", narrowed_files(), ids=lambda path: path.name)
+def test_narrowed_files_normalize_policy_text_before_exact_comparison(
+    path: Path,
+) -> None:
+    text = path.read_text(encoding="utf-8")
+    assert RAW_POLICY_TEXT_COMPARED.findall(text) == []
+
+
 def test_the_check_would_catch_the_original_bug() -> None:
+    assert RAW_POLICY_TEXT_COMPARED.search(
+        "OR pg_catalog.regexp_replace(\n  actual.qual, '\\s+', ' ', 'g')"
+    )
     assert QUALIFIED_POLICY_TEXT.search("AND with_check LIKE '%public.address%'")
     assert STANDALONE_EMPTY_ACL.search(
         "pg_catalog.aclexplode(\n    COALESCE(attribute.attacl, "

@@ -1055,11 +1055,18 @@ BEGIN
            OR actual.cmd <> expected.command_name
            OR actual.permissive <> 'PERMISSIVE'
            OR actual.roles::text <> expected.role_list
+           -- The expected text was recorded in the SQL Editor, where public is
+           -- on the search path; here it is not, so the same policy prints
+           -- public.current_customer_profile_id() and FROM public.cart. Only
+           -- that qualifier is removed; any other schema still differs.
            OR pg_catalog.regexp_replace(
-                  actual.qual, '\\s+', ' ', 'g'
+                  pg_catalog.replace(actual.qual, 'public.', ''), '\\s+', ' ', 'g'
               ) IS DISTINCT FROM expected.using_expression
            OR pg_catalog.regexp_replace(
-                  actual.with_check, '\\s+', ' ', 'g'
+                  pg_catalog.replace(actual.with_check, 'public.', ''),
+                  '\\s+',
+                  ' ',
+                  'g'
               ) IS DISTINCT FROM expected.check_expression
     ) THEN
         RAISE EXCEPTION USING
