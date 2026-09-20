@@ -117,7 +117,18 @@ a brief with no bedrooms, and search had the same blind spot. Fixed. It also
 found that the tagger rotates its third feel between runs, which is why tags
 are written as the consensus of several runs.
 
-Branches: **`main` only.** On 2026-09-18, at the user's explicit request, `main`
+Branches: **`main`, plus one handoff branch.** On 2026-09-20 the user asked for
+a branch carrying only what the Flutter developer needs, so `flutter-handoff`
+was created as an **orphan** branch: one commit, no shared history, holding
+`app/`, `scripts/serve.py`, the packaging files, `FLUTTER.md`, a short README
+and the three Flutter documents. No migrations, security packages, seed data,
+evaluation harness or tests. It was verified standalone (`uv sync` from that
+tree alone, then the server serving /health, /v1/meta, /docs and all fifteen
+endpoints on placeholder credentials). Never merge it into `main`: it would
+delete most of the repository. Changes flow one way, from `main` into it, by
+copying files.
+
+Otherwise, `main` only. On 2026-09-18, at the user's explicit request, `main`
 was fast-forwarded to the tip of the stacked branches and the three phase
 branches (`phase-3.2c-security-hardening`, `phase-3.2d-security-hardening`,
 `phase-4a-catalogue-audit`) were deleted locally and on origin. Every commit
