@@ -368,11 +368,25 @@ STYLES = Vocabulary(
 ROOM_TYPES = Vocabulary(
     "room type",
     (
+        # Egyptians say أوضة, not غرفة, and say it in the plural when they
+        # mean several. Measured on 2026-09-20: "٣ أوض نوم" resolved to nothing
+        # at all, so a three-bedroom flat became a brief with no bedrooms.
         VocabularyTerm(
             "living_room",
             "living room",
             "غرفة معيشة",
-            ("living", "lounge", "ليفنج", "معيشة", "صالة", "living-room"),
+            (
+                "living",
+                "lounge",
+                "ليفنج",
+                "معيشة",
+                "صالة",
+                "living-room",
+                "أوضة معيشة",
+                "أوض معيشة",
+                "غرف معيشة",
+                "أوضة قعاد",
+            ),
         ),
         # Egypt sells the formal sitting room as a reception, and the entrance
         # set as an antrée. Both are the room a customer names out loud.
@@ -386,31 +400,74 @@ ROOM_TYPES = Vocabulary(
             "bedroom",
             "bedroom",
             "غرفة نوم",
-            ("bed room", "نوم", "master bedroom", "غرفة النوم"),
+            (
+                "bed room",
+                "نوم",
+                "master bedroom",
+                "غرفة النوم",
+                "غرف نوم",
+                "أوضة نوم",
+                "أوض نوم",
+                "اوضه نوم",
+                "غرفة نوم رئيسية",
+            ),
         ),
         VocabularyTerm(
             "kids_room",
             "kids room",
             "غرفة أطفال",
-            ("children room", "nursery", "أطفال", "اطفال", "kids", "غرفة اطفال"),
+            (
+                "children room",
+                "nursery",
+                "أطفال",
+                "اطفال",
+                "kids",
+                "غرف أطفال",
+                "أوضة أطفال",
+                "أوض أطفال",
+                "غرفة الأطفال",
+            ),
         ),
         VocabularyTerm(
             "dining_room",
             "dining room",
             "غرفة سفرة",
-            ("dining", "سفرة", "غرفة طعام", "dining-room"),
+            (
+                "dining",
+                "سفرة",
+                "غرفة طعام",
+                "dining-room",
+                "أوضة سفرة",
+                "أوض سفرة",
+                "غرف سفرة",
+            ),
         ),
         VocabularyTerm(
             "home_office",
             "home office",
             "مكتب منزلي",
-            ("office", "مكتب", "study", "دراسة", "work from home"),
+            (
+                "office",
+                "مكتب",
+                "study",
+                "دراسة",
+                "work from home",
+                "أوضة مكتب",
+                "غرفة مكتب",
+            ),
         ),
         VocabularyTerm(
             "guest_room",
             "guest room",
             "غرفة ضيوف",
-            ("guests", "ضيوف", "spare room"),
+            (
+                "guests",
+                "ضيوف",
+                "spare room",
+                "غرف ضيوف",
+                "أوضة ضيوف",
+                "أوض ضيوف",
+            ),
         ),
         VocabularyTerm(
             "balcony",

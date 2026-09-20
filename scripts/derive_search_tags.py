@@ -9,9 +9,11 @@ catalogue entry, and writes the result to seed/ as SQL. It writes nothing to
 Supabase: a human reads the file and runs it, exactly as with every other
 change to live data in this repository.
 
-One model call per product. With --with-photos it also sends each product's
-primary photograph, fetched through the same HTTPS allowlist the room preview
-uses, which costs more and labels better.
+Two model calls per product by default (--runs), keeping only the tags most
+runs agreed on: measured live, the model is stable on the sure tags and not on
+the marginal ones. With --with-photos it also sends each product's primary
+photograph, fetched through the same HTTPS allowlist the room preview uses,
+which costs more and labels better.
 
 Nothing it produces is presented as a seller's word. Every row lands in
 product_search_tag with source = 'ai_inferred', and the API shows any reason
@@ -36,7 +38,7 @@ from app.ai.provider import (
     ImageBytes,
 )
 from app.ai.providers.gemini import build_gemini_provider
-from app.ai.tagging import infer_tags, product_prompt
+from app.ai.tagging import consensus, infer_tags, product_prompt
 from app.auth.models import AuthenticatedRequestContext
 from app.catalog.gateway import SupabaseCatalogueGateway
 from app.catalog.normalization import InferredTag
@@ -163,6 +165,7 @@ async def label_catalogue(
     provider: AIProvider,
     fetcher: ReferenceImageFetcher | None,
     limit: int | None,
+    runs: int,
 ) -> list[tuple[UpstreamProduct, tuple[InferredTag, ...]]]:
     products: list[UpstreamProduct] = []
     offset = 0
@@ -192,10 +195,17 @@ async def label_catalogue(
         )
         photographs = await photograph(product, fetcher) if fetcher else ()
         try:
-            tags = await infer_tags(prompt, provider=provider, photographs=photographs)
+            # Several runs, then only what most of them agreed on. The model is
+            # stable on the sure tags and not on the marginal ones, and these
+            # rows are written once and then order everyone's results.
+            answers = [
+                await infer_tags(prompt, provider=provider, photographs=photographs)
+                for _ in range(runs)
+            ]
         except AIProviderError as error:
             print(f"  {index:>3}. {product.id} SKIPPED ({type(error).__name__})")
             continue
+        tags = consensus(answers)
         tagged.append((product, tags))
         summary = ", ".join(f"{tag.slug} {tag.confidence}" for tag in tags) or "-"
         print(f"  {index:>3}. {product.id} {summary}")
@@ -239,6 +249,7 @@ async def run(arguments: argparse.Namespace) -> int:
             provider=provider,
             fetcher=fetcher,
             limit=arguments.limit,
+            runs=arguments.runs,
         )
 
     if not tagged:
@@ -276,6 +287,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Also send each product's primary photograph.",
     )
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--runs",
+        type=int,
+        default=2,
+        choices=(1, 2, 3),
+        help="Label each product this many times and keep what most runs agreed "
+        "on. Costs that many calls per product; 1 keeps whatever one run said.",
+    )
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument(
         "--user-id",

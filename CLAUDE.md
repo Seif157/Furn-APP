@@ -86,8 +86,16 @@ The 2026-09-20 work is in docs/phase-9-fuzzy-intake-personalization.md. Note
 what is inert until a migration runs: fuzzy ranking needs
 `migrations/product-search-tags-2026-09-20.sql` applied and
 `scripts/derive_search_tags.py` run, and until then a search for "cosy"
-behaves exactly as it did before. None of the four features has been measured
-against the live model.
+behaves exactly as it did before.
+
+The three new prompts were measured live on 2026-09-20 with
+`scripts/live_intake_smoke.py` (tagging, triage, brief; Gemini only, no
+Supabase): triage 10/10, brief 16/16, tagging stable on style and room. It
+found a real vocabulary gap first: every Egyptian colloquial room word (أوضة
+نوم, أوض نوم, غرف نوم and the rest) resolved to nothing, so "٣ أوض نوم" became
+a brief with no bedrooms, and search had the same blind spot. Fixed. It also
+found that the tagger rotates its third feel between runs, which is why tags
+are written as the consensus of several runs.
 
 Branches: **`main` only.** On 2026-09-18, at the user's explicit request, `main`
 was fast-forwarded to the tip of the stacked branches and the three phase

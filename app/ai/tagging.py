@@ -225,6 +225,51 @@ def product_prompt(
     return "\n".join(lines)
 
 
+def consensus(runs: Sequence[tuple[InferredTag, ...]]) -> tuple[InferredTag, ...]:
+    """Keep the tags most runs agreed on, at their average confidence.
+
+    Measured against the live model on 2026-09-20: at temperature 0, two runs
+    over the same product agreed on the sure tags and disagreed on the marginal
+    ones, dropping or swapping a third feel. That is fine in a chat and wrong
+    in a table: the tags are written once and then quietly order everyone's
+    results, so re-running the tagger should not reshuffle the catalogue.
+
+    A tag must appear in more than half the runs. With one run this is exactly
+    what that run said, so the cheap path is unchanged.
+    """
+
+    if not runs:
+        return ()
+    if len(runs) == 1:
+        return runs[0]
+
+    totals: dict[tuple[str, str], list[Decimal]] = {}
+    for tags in runs:
+        for tag in tags:
+            totals.setdefault((tag.kind, tag.slug), []).append(tag.confidence)
+
+    threshold = len(runs) / 2
+    agreed: list[InferredTag] = []
+    for (kind, slug), confidences in totals.items():
+        if len(confidences) <= threshold:
+            continue
+        mean = (sum(confidences, Decimal("0")) / Decimal(len(confidences))).quantize(
+            Decimal("0.01")
+        )
+        if mean < MIN_CONFIDENCE:
+            continue
+        agreed.append(InferredTag(kind=kind, slug=slug, confidence=mean))  # type: ignore[arg-type]
+
+    kept: list[InferredTag] = []
+    for _field, kind, _vocabulary in TAG_LISTS:
+        ranked = sorted(
+            (tag for tag in agreed if tag.kind == kind),
+            key=lambda tag: (-tag.confidence, tag.slug),
+        )
+        kept.extend(ranked[:MAX_TAGS_PER_KIND])
+    return tuple(kept)
+
+
 async def infer_tags(
     prompt: str,
     *,

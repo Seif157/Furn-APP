@@ -163,16 +163,59 @@ even called. Nothing is sponsored: this marketplace has no paid placement, and
 inventing a "sponsored" flag for something nobody paid for would be the
 disguise 6.10 forbids.
 
+## Measured against the live model, 2026-09-20
+
+`scripts/live_intake_smoke.py --i-have-authorization` puts the three new
+prompts in front of Gemini. It contacts Google and nothing else: the products
+come from the offline seed and the service directory is a plausible list
+written in the script, because reading the real one needs a signed-in session.
+
+Final run, `--repeats 2` (four tagging calls per product, two per other case):
+
+```text
+tagging   style and room identical across two taggings, 4 of 4 products
+triage    5 of 5 cases, twice each, including the one that must match nothing
+brief     16 of 16 checks
+```
+
+Three things it found.
+
+**A vocabulary gap that would have shipped.** "عايز أفرش شقة فيها ٣ أوض نوم
+وريسبشن" came back with a reception and no bedrooms at all. The room vocabulary
+knew only the formal غرفة نوم; every Egyptian colloquial form — أوضة نوم, أوض
+نوم, غرف نوم, and the same for children's, dining, guest and office rooms —
+resolved to nothing and was silently reported as unresolved. This affected
+search too, not only the brief. Fixed by adding those forms.
+
+**The tagger is not deterministic at the margin.** Over six runs per product at
+temperature 0, style and room are identical every time and their confidences
+move by at most 0.05. The third feel rotates among two or three equally
+defensible ones: the same wooden bed is "cosy" in one run and "hotel-like" in
+the next.
+
+Two responses. The derivation script writes the consensus of several runs
+(`--runs`, default 2) rather than one run's opinion, which removes the
+once-in-six flukes. And the smoke test requires style and room to hold still
+while reporting a differing feel rather than failing on it, because demanding
+determinism there would mean either dropping feels or pretending to a precision
+that is not there. A borderline feel is worth at most 0.6 of one soft component
+and only when a customer asks for that feel.
+
+**Triage refuses correctly.** "عايز حد يصلح الغسالة" — a washing machine, which
+this marketplace does not service — returned no services, twice, rather than
+reaching for the nearest thing. That is the behaviour that makes choosing by
+position worth the indirection.
+
 ## What is not done
 
 - **The tag migration has not been applied** and no tags exist, so fuzzy
   ranking is inert: a search for "cosy" behaves exactly as it did yesterday.
   Order: apply the migration, run the derivation script, read the generated
   file, run it.
-- **Nothing here has met the live model.** Every test uses a stub. The
-  tagging, triage and brief prompts have never been measured against Gemini,
-  unlike the search parser, which was measured over 16 cases at 3 repeats
-  (Phase 5D). Expect to tune them, and add them to the evaluation.
+- **The live measurement is a smoke test, not an evaluation.** Four products,
+  five triage cases and three briefs, against Phase 5D's 16 cases at 3 repeats
+  with computed ground truth. The service directory it uses is invented, so
+  triage has never met the real one. Fold these into the Phase 5D benchmark.
 - **Section 11 is still open.** Once tags exist, fuzzy cases can be
   benchmarked for the first time, which is the precondition the vector-search
   decision was waiting on.

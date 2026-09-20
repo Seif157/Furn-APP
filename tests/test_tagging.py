@@ -19,6 +19,7 @@ from app.ai.tagging import (
     TAGGING_INSTRUCTION,
     TAGGING_SCHEMA,
     TagDraft,
+    consensus,
     infer_tags,
     product_prompt,
     tags_from_draft,
@@ -218,6 +219,63 @@ async def test_an_empty_answer_is_allowed() -> None:
     provider = StubProvider({})
 
     assert await infer_tags("Category: Sofas\nName: x", provider=provider) == ()
+
+
+# --- agreeing with itself ---------------------------------------------------
+
+
+def test_one_run_is_kept_exactly_as_it_came() -> None:
+    tags = (InferredTag(kind="style", slug="modern", confidence=Decimal("0.9")),)
+
+    assert consensus([tags]) == tags
+    assert consensus([]) == ()
+
+
+def test_only_what_most_runs_agreed_on_survives() -> None:
+    """Measured live: the sure tags repeat, the marginal ones come and go."""
+
+    first = (
+        InferredTag(kind="style", slug="modern", confidence=Decimal("0.90")),
+        InferredTag(kind="feel", slug="cosy", confidence=Decimal("0.50")),
+    )
+    second = (
+        InferredTag(kind="style", slug="modern", confidence=Decimal("0.80")),
+        InferredTag(kind="feel", slug="calm", confidence=Decimal("0.60")),
+    )
+
+    agreed = consensus([first, second])
+
+    assert [(tag.slug, tag.confidence) for tag in agreed] == [
+        ("modern", Decimal("0.85"))
+    ]
+
+
+def test_two_of_three_is_enough() -> None:
+    sure = InferredTag(kind="feel", slug="calm", confidence=Decimal("0.60"))
+    once = InferredTag(kind="feel", slug="airy", confidence=Decimal("0.90"))
+
+    agreed = consensus([(sure,), (sure,), (sure, once)])
+
+    assert [tag.slug for tag in agreed] == ["calm"]
+
+
+def test_agreeing_twice_does_not_promote_a_weak_guess() -> None:
+    """Repetition is not evidence: the average is kept, not the sum."""
+
+    weak = InferredTag(kind="feel", slug="cosy", confidence=Decimal("0.40"))
+    weaker = InferredTag(kind="feel", slug="cosy", confidence=Decimal("0.42"))
+
+    assert consensus([(weak,), (weaker,)])[0].confidence == Decimal("0.41")
+    assert consensus([(weak,), (weak,)])[0].confidence == weak.confidence
+
+
+def test_consensus_still_keeps_only_the_surest_few() -> None:
+    many = tuple(
+        InferredTag(kind="style", slug=term.slug, confidence=Decimal("0.50"))
+        for term in STYLES.terms[:5]
+    )
+
+    assert len(consensus([many, many])) == MAX_TAGS_PER_KIND
 
 
 # --- the file that gets written ---------------------------------------------
