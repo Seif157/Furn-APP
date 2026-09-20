@@ -19,7 +19,15 @@ from fastapi import APIRouter, Request
 
 from app.ai.service import MAX_HISTORY
 from app.catalog.models import StrictResponseModel
-from app.catalog.normalization import CATEGORIES, COLOURS, MATERIALS, Vocabulary
+from app.catalog.normalization import (
+    CATEGORIES,
+    COLOURS,
+    FEELS,
+    MATERIALS,
+    ROOM_TYPES,
+    STYLES,
+    Vocabulary,
+)
 from app.config import AISettings
 from app.recommendations.comparison import MAX_COMPARED
 from app.recommendations.similar import MAX_SIMILAR
@@ -39,6 +47,10 @@ class FeaturesResponse(StrictResponseModel):
     compare: bool
     similar_products: bool
     public_reviews: bool
+    service_triage: bool
+    """Reading a described problem into the marketplace's own services."""
+    furnishing_brief: bool
+    """Reading a furnishing job into the request form's fields."""
 
 
 class LimitsResponse(StrictResponseModel):
@@ -52,6 +64,7 @@ class LimitsResponse(StrictResponseModel):
     max_piece_quantity: int
     max_compared_products: int
     max_similar_products: int
+    intake_per_minute: int
 
 
 class MetaResponse(StrictResponseModel):
@@ -71,6 +84,11 @@ class VocabularyResponse(StrictResponseModel):
     categories: tuple[TermResponse, ...]
     colours: tuple[TermResponse, ...]
     materials: tuple[TermResponse, ...]
+    styles: tuple[TermResponse, ...]
+    room_types: tuple[TermResponse, ...]
+    feels: tuple[TermResponse, ...]
+    """Styles, rooms and feels are matched against inferred tags, so a chip
+    built from one ranks results rather than filtering them."""
 
 
 class ExamplesResponse(StrictResponseModel):
@@ -128,6 +146,9 @@ VOCABULARY = VocabularyResponse(
     categories=_terms(CATEGORIES),
     colours=_terms(COLOURS),
     materials=_terms(MATERIALS),
+    styles=_terms(STYLES),
+    room_types=_terms(ROOM_TYPES),
+    feels=_terms(FEELS),
 )
 
 
@@ -150,6 +171,8 @@ async def get_meta(request: Request) -> MetaResponse:
             compare=True,
             similar_products=True,
             public_reviews=True,
+            service_triage=ai_ready,
+            furnishing_brief=ai_ready,
         ),
         limits=LimitsResponse(
             search_per_minute=settings.rate_limit_search_per_minute,
@@ -162,6 +185,7 @@ async def get_meta(request: Request) -> MetaResponse:
             max_piece_quantity=MAX_QUANTITY,
             max_compared_products=MAX_COMPARED,
             max_similar_products=MAX_SIMILAR,
+            intake_per_minute=settings.rate_limit_intake_per_minute,
         ),
     )
 

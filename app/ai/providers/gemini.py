@@ -59,15 +59,26 @@ class GeminiProvider:
         instruction: str,
         prompt: str,
         schema: Mapping[str, Any],
+        references: Sequence[ImageBytes] = (),
     ) -> Mapping[str, Any]:
         """Send one request and return its parsed JSON answer."""
 
+        parts: list[dict[str, Any]] = [
+            {
+                "inlineData": {
+                    "mimeType": reference.mime_type,
+                    "data": base64.b64encode(reference.data).decode("ascii"),
+                }
+            }
+            for reference in references
+        ]
+        parts.append({"text": prompt})
         body: dict[str, Any] = {
             "systemInstruction": {"parts": [{"text": instruction}]},
             # User text stays in `contents`. Splicing it into the instruction
             # would erase the only structural distinction the API offers
             # between backend rules and whatever the user typed.
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "contents": [{"role": "user", "parts": parts}],
             "generationConfig": {
                 "responseMimeType": "application/json",
                 "responseSchema": dict(schema),

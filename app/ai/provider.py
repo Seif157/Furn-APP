@@ -75,12 +75,15 @@ class AIProvider(Protocol):
         instruction: str,
         prompt: str,
         schema: Mapping[str, Any],
+        references: Sequence[ImageBytes] = (),
     ) -> Mapping[str, Any]:
         """Return the provider's JSON answer as a mapping.
 
         ``instruction`` is trusted backend text. ``prompt`` is user-controlled
         and must be sent as conversational content, never spliced into the
-        instruction. Implementations raise ``AIProviderUnavailableError`` or
+        instruction. ``references`` are photographs the answer may describe,
+        sent alongside the prompt; they are backend-chosen, never user-supplied
+        bytes. Implementations raise ``AIProviderUnavailableError`` or
         ``AIResponseInvalidError`` and never return a partial answer.
         """
         ...

@@ -19,12 +19,28 @@ from __future__ import annotations
 from decimal import Decimal
 
 from app.catalog.models import ProductResponse, StrictResponseModel
-from app.catalog.normalization import CATEGORIES, COLOURS, MATERIALS, Vocabulary
+from app.catalog.normalization import (
+    CATEGORIES,
+    COLOURS,
+    FEELS,
+    MATERIALS,
+    ROOM_TYPES,
+    STYLES,
+    NormalizedProduct,
+    Vocabulary,
+)
 from app.catalog.transform import build_product_response
 from app.catalog.upstream_models import UpstreamProduct
 from app.recommendations.alternatives import Alternative
-from app.recommendations.explanations import match_reasons, shortfall_reasons
+from app.recommendations.explanations import (
+    match_reasons,
+    preference_reasons,
+    shortfall_reasons,
+)
 from app.recommendations.models import AlternativeResponse, ReasonResponse
+from app.recommendations.offerings import LABELS as OFFERING_LABELS
+from app.recommendations.offerings import SellerOffering
+from app.search.clarification import FollowUp, follow_up
 from app.search.localization import response_language, term_label
 from app.search.models import (
     DimensionRange,
@@ -68,10 +84,11 @@ class InterpretationResponse(StrictResponseModel):
     in_stock_only: bool
     preferred_colours: tuple[TermResponse, ...]
     preferred_materials: tuple[TermResponse, ...]
-    styles: tuple[str, ...]
-    """Matching keys against enrichment attributes, not display labels, so
-    these stay in English in every language."""
-    room_type: str | None
+    styles: tuple[TermResponse, ...]
+    feels: tuple[TermResponse, ...]
+    """How the customer wants it to feel. Ranked against inferred tags only,
+    never filtered on."""
+    room_type: TermResponse | None
 
 
 class UnresolvedResponse(StrictResponseModel):
@@ -110,6 +127,50 @@ class SearchItemResponse(StrictResponseModel):
     """Why it matches, as catalogue facts. Phase 6C; never model prose."""
 
 
+class FollowUpOptionResponse(StrictResponseModel):
+    """One tappable answer to the follow-up question."""
+
+    value: str
+    """Stable and machine-readable: a category slug, or a price band."""
+    label: str
+    """What to show on the chip, in the customer's language."""
+    send: str
+    """What to send as the next `query`, with this message in `history`.
+
+    A tapped answer and a typed one take the same path through the parser, so
+    the app needs no special case and the server needs no new state."""
+
+
+class FollowUpResponse(StrictResponseModel):
+    """A question with answers the customer can tap. Phase 7A.
+
+    Present only when asking is worth it: the sentence was too vague to search,
+    or it named no kind of furniture and matched broadly. Every option is built
+    from products that actually matched, so tapping one cannot lead nowhere.
+    """
+
+    field: str
+    question: str
+    options: tuple[FollowUpOptionResponse, ...]
+
+
+class SellerOfferResponse(StrictResponseModel):
+    """A seller's made-to-order offering, shown only when nothing matched.
+
+    Not a catalogue product: there is no stock, colour or delivery promise
+    here, which is why it travels in its own list with its own label instead of
+    among the results. Section 6.10.
+    """
+
+    id: str
+    title: str
+    description: str | None
+    price: Decimal | None
+    seller_id: str
+    label: str
+    """Says what this is, in the customer's language. Show it with the offer."""
+
+
 class SearchResponse(StrictResponseModel):
     query: str
     language: str
@@ -124,11 +185,21 @@ class SearchResponse(StrictResponseModel):
     has_more: bool
     clarification: str | None
     """A question to ask when the sentence was too vague to search."""
+    follow_up: FollowUpResponse | None
+    """The same question with tappable answers, when one is worth asking."""
     unresolved: tuple[UnresolvedResponse, ...]
     excluded_by: tuple[ExclusionResponse, ...]
     """Why candidates were removed, most exclusions first."""
     alternatives: tuple[AlternativeResponse, ...]
     """Nearest real products, offered only when nothing matched. Phase 6.10."""
+    seller_offers: tuple[SellerOfferResponse, ...]
+    """Made-to-order offerings, also only when nothing matched. Never mixed
+    into the results and never presented as catalogue products."""
+    personalized: bool
+    """True when this customer's own purchase history broke ties in the order.
+
+    It never changed which products matched, only which of the matching ones
+    came first."""
 
 
 def _price_range(bounds: PriceRange | None) -> RangeResponse | None:
@@ -180,14 +251,40 @@ def build_interpretation(
         in_stock_only=hard.in_stock_only,
         preferred_colours=_terms(COLOURS, soft.colours, language),
         preferred_materials=_terms(MATERIALS, soft.materials, language),
-        styles=soft.styles,
-        room_type=soft.room_type,
+        styles=_terms(STYLES, soft.styles, language),
+        feels=_terms(FEELS, soft.feels, language),
+        room_type=(
+            TermResponse(
+                slug=soft.room_type,
+                label=term_label(ROOM_TYPES, soft.room_type, language),
+            )
+            if soft.room_type is not None
+            else None
+        ),
+    )
+
+
+def _follow_up_response(asked: FollowUp | None) -> FollowUpResponse | None:
+    if asked is None:
+        return None
+    return FollowUpResponse(
+        field=asked.field,
+        question=asked.question,
+        options=tuple(
+            FollowUpOptionResponse(
+                value=option.value, label=option.label, send=option.send
+            )
+            for option in asked.options
+        ),
     )
 
 
 def build_search_response(
     products: tuple[UpstreamProduct, ...],
     *,
+    normalized: tuple[NormalizedProduct, ...] = (),
+    offers: tuple[SellerOffering, ...] = (),
+    personalized: bool = False,
     results: SearchResults,
     specification: SearchSpecification,
     query: str,
@@ -205,6 +302,7 @@ def build_search_response(
     """
 
     by_id = {product.id: product for product in products}
+    normalized_by_id = {product.id: product for product in normalized}
     items: list[SearchItemResponse] = []
     for scored in results.items:
         product = by_id.get(scored.product_id)
@@ -218,7 +316,18 @@ def build_search_response(
                 product=response,
                 score=scored.score,
                 matched=tuple(check.name for check in scored.checks if check.satisfied),
-                reasons=match_reasons(scored.checks, specification.hard, language),
+                # Catalogue facts first, then the platform's own guesses about
+                # style, room and feel, each marked as one.
+                reasons=match_reasons(scored.checks, specification.hard, language)
+                + (
+                    preference_reasons(
+                        normalized_by_id[scored.product_id],
+                        specification.soft,
+                        language,
+                    )
+                    if scored.product_id in normalized_by_id
+                    else ()
+                ),
             )
         )
 
@@ -242,6 +351,17 @@ def build_search_response(
             )
         )
 
+    asked = follow_up(
+        specification=specification,
+        matches=tuple(
+            normalized_by_id[scored.product_id]
+            for scored in results.items
+            if scored.product_id in normalized_by_id
+        ),
+        match_count=results.match_count,
+        clarification=clarification,
+        language=language,
+    )
     return SearchResponse(
         query=query,
         language=response_language(language),
@@ -253,6 +373,7 @@ def build_search_response(
         truncated=truncated,
         has_more=results.has_more,
         clarification=clarification,
+        follow_up=_follow_up_response(asked),
         unresolved=tuple(
             UnresolvedResponse(field=term.field, surface=term.surface)
             for term in unresolved
@@ -264,4 +385,16 @@ def build_search_response(
             )
         ),
         alternatives=tuple(offered),
+        seller_offers=tuple(
+            SellerOfferResponse(
+                id=str(offer.id),
+                title=offer.title,
+                description=offer.description,
+                price=offer.price,
+                seller_id=str(offer.seller_id),
+                label=OFFERING_LABELS[response_language(language)],
+            )
+            for offer in offers
+        ),
+        personalized=personalized,
     )

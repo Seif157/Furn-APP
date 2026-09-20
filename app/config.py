@@ -162,6 +162,9 @@ class AISettings(BaseSettings):
     rate_limit_room_image_per_hour: Annotated[int, Field(ge=1, le=1000)] = Field(
         default=20, validation_alias="RATE_LIMIT_ROOM_IMAGE_PER_HOUR"
     )
+    rate_limit_intake_per_minute: Annotated[int, Field(ge=1, le=1000)] = Field(
+        default=20, validation_alias="RATE_LIMIT_INTAKE_PER_MINUTE"
+    )
     """Per signed-in user. A preview costs far more than a text call, so it is
     limited per hour rather than per minute."""
     ai_cache_ttl_seconds: Annotated[float, Field(ge=0, le=86400)] = Field(

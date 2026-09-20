@@ -15,7 +15,15 @@ from __future__ import annotations
 from typing import Any
 
 from app.ai.models import MAX_QUESTION_LENGTH, MAX_SURFACE_LENGTH, RequirementDraft
-from app.catalog.normalization import CATEGORIES, COLOURS, MATERIALS, Vocabulary
+from app.catalog.normalization import (
+    CATEGORIES,
+    COLOURS,
+    FEELS,
+    MATERIALS,
+    ROOM_TYPES,
+    STYLES,
+    Vocabulary,
+)
 from app.search.models import MAX_TERMS
 
 
@@ -82,6 +90,15 @@ Colours:
 Materials:
 {_vocabulary_lines(MATERIALS)}
 
+Styles:
+{_vocabulary_lines(STYLES)}
+
+Rooms:
+{_vocabulary_lines(ROOM_TYPES)}
+
+Feels:
+{_vocabulary_lines(FEELS)}
+
 If the customer names something that is not in these lists, write their own
 word. Do not substitute the nearest listed word.
 
@@ -91,8 +108,14 @@ Copy their word, not the closest entry in the list above: "coffee table" stays
 named no kind of furniture at all. Never put a category there that the customer
 did not ask for; a wrong category is worse than an empty one.
 
-Styles and room types are free text. Write them in English, lowercase, as the
-customer meant them, for example "modern", "scandinavian", "living room".
+Styles, rooms and feels work the same way as categories: copy the customer's
+own word rather than the closest listed entry. "مودرن" stays "مودرن".
+
+A style is how it looks: modern, classic, scandinavian. A feel is how the
+customer wants the room to be: cosy, luxurious, bright, hotel-like, good for a
+small space. Both are preferences and never limits. Put a feel in feels, not in
+styles, and put nothing in either that the customer did not ask for; a sentence
+with no such word leaves both lists empty.
 
 Set clarification_question only when the sentence is too vague to search at
 all, such as "I need furniture". A sentence naming a category is searchable, so
@@ -141,6 +164,7 @@ REQUIREMENT_SCHEMA: dict[str, Any] = {
         "preferred_colours": _SURFACE_LIST,
         "preferred_materials": _SURFACE_LIST,
         "styles": _SURFACE_LIST,
+        "feels": _SURFACE_LIST,
         "room_type": _SURFACE,
         "preferred_width_cm": _NUMBER,
         "preferred_height_cm": _NUMBER,

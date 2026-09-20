@@ -24,12 +24,45 @@ The app only ever holds the Supabase URL, the **publishable** key, and this
 API's address. Never put the Gemini key or any Supabase secret key in the app;
 they live only on the server.
 
-## Base URL
+## Base URL, while the API runs on a laptop
 
-Pass it at build time so the same code runs against a laptop and production:
+The API is not deployed yet: it runs on the developer's laptop, and only
+Supabase is in the cloud. So sign-in, the catalogue and every direct Supabase
+call work from anywhere, and the AI calls work only while the laptop is on the
+same Wi-Fi with the server running.
+
+Start it, listening on the network rather than only on itself:
 
 ```bash
-flutter run --dart-define=API_BASE_URL=http://192.168.1.9:8000   # laptop
+uv run python -m scripts.serve --host 0.0.0.0
+```
+
+Then pick the address for where the app runs. They are not interchangeable:
+`localhost` inside an emulator means the emulator, not the laptop.
+
+| App runs on | `API_BASE_URL` |
+|---|---|
+| Android emulator | `http://10.0.2.2:8000` |
+| iOS simulator | `http://127.0.0.1:8000` |
+| A real phone on the same Wi-Fi | `http://<laptop LAN IP>:8000` |
+| Flutter web / desktop on the laptop | `http://127.0.0.1:8000` |
+
+Find the laptop's address with `ipconfig` (Windows) or `ifconfig` (macOS); it
+is the `192.168.x.x` one, and the router may change it after a reboot. Check it
+from the phone's browser first: `http://<that address>:8000/health` must answer
+`{"status":"ok", ...}`. If it hangs, the laptop's firewall is blocking the
+port, not the app. On Windows, in an **administrator** PowerShell:
+
+```powershell
+New-NetFirewallRule -DisplayName "Furn API 8000" -Direction Inbound `
+  -Protocol TCP -LocalPort 8000 -Profile Private -Action Allow
+```
+
+Pass the address at build time so the same code runs against a laptop and, later,
+production:
+
+```bash
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000
 flutter build apk --dart-define=API_BASE_URL=https://api.example.com
 ```
 
@@ -37,11 +70,13 @@ flutter build apk --dart-define=API_BASE_URL=https://api.example.com
 const apiBaseUrl = String.fromEnvironment('API_BASE_URL');
 ```
 
-On a laptop, start the API with `uv run python -m scripts.serve --host
-0.0.0.0` and use the laptop's LAN address; phone and laptop must be on the
-same Wi-Fi. Plain `http://` needs a debug-only exception: on Android
+Plain `http://` needs a debug-only exception: on Android
 `android:usesCleartextTraffic="true"` in the debug manifest, on iOS an
 `NSAppTransportSecurity` exception. Production is HTTPS and needs neither.
+
+When the API is unreachable the app should stay usable: catch the socket error,
+hide the AI screens exactly as it does for a `false` feature flag below, and
+never block sign-in, browsing or checkout on it.
 
 ## On startup: ask what is switched on
 
@@ -77,6 +112,8 @@ error. Use `limits` for input lengths and counters instead of hard-coding them.
 | Product page, reviews | `GET /v1/reviews/public?product_id=…` | No sign-in needed |
 | Compare (2-4 products) | `POST /v1/compare` | No AI, fast |
 | Room planner | `POST /v1/rooms/plan` | ~3 s. Send `history` for follow-ups |
+| Service request form | `POST /v1/intake/service` | Reads "the wardrobe door broke" into real services |
+| Furnishing request form | `POST /v1/intake/furnishing` | Reads "3 bedrooms and a reception, 150k" into the form |
 | Room preview image | `POST /v1/rooms/image` | 10-20 s. Body is the plan's `image_request` |
 | Catalogue list and detail | `GET /v1/catalog/products`, `/{id}` | Or Supabase directly, as today |
 | Cart, before the first "add to cart" | `POST /v1/cart` | Returns `cart_id`; then add lines in Supabase |
@@ -169,6 +206,13 @@ remembers nothing; the list lives in the app.
    20 s for everything else.
 8. **Label AI previews.** Show the response's `label` and `disclaimer` with
    every room preview; the product list, not the picture, is what is sold.
+9. **A reason with `"basis": "inferred"` is a guess, not a fact.** Style, room
+   and feel are nobody's stated word: the marketplace inferred them. The text
+   already says so ("looks modern (our guess)"); style it differently from a
+   catalogue fact, or hide it, but never present it as one.
+10. **`seller_offers` are not products.** They appear only when nothing
+    matched, they are made to order, and each carries a `label` saying so.
+    Show them in their own section, never in the results list.
 
 ## Supabase rules the app must follow (final, applied 2026-09-18)
 

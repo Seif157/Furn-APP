@@ -816,3 +816,140 @@ Nothing identifies the reviewer: no customer id, no name. Errors: 503
 
 A customer's own reviews (for example, "my reviews") can still be read directly
 with their session, as before.
+
+
+# What changed on 2026-09-20
+
+Four additions to the search response and two new endpoints. Everything already
+in the contract still works the same way; only the three fields marked
+**changed** need an edit to existing code.
+
+## Search response
+
+```jsonc
+{
+  "interpretation": {
+    "styles": [{"slug": "modern", "label": "مودرن"}],   // changed: was ["modern"]
+    "room_type": {"slug": "reception", "label": "ريسبشن"}, // changed: was a string
+    "feels": [{"slug": "cosy", "label": "دافئ ومريح"}]  // new
+  },
+  "items": [
+    {
+      "reasons": [
+        {"code": "price", "text": "28,500 جنيه، في حدود 30,000 جنيه",
+         "basis": "catalogue"},
+        {"code": "styles", "text": "شكله مودرن (تقديرنا)", "basis": "inferred"}
+      ]
+    }
+  ],
+  "follow_up": {                                        // new, or null
+    "field": "category",
+    "question": "بتدور على إيه؟",
+    "options": [
+      {"value": "sofas", "label": "كنب", "send": "كنب"}
+    ]
+  },
+  "seller_offers": [],                                  // new
+  "personalized": false                                 // new
+}
+```
+
+**`basis`** is `"catalogue"` or `"inferred"`. A catalogue reason restates
+something the marketplace holds: a price, a width, a colour in stock. An
+inferred reason is the platform's own guess about style, room or feel, which no
+seller states. The wording already says so; style it differently, or hide it.
+Never show a guess as a fact.
+
+**`follow_up`** is the clarification question with answers the customer can
+tap. It is present when the sentence was too vague, or when it named no kind of
+furniture and matched broadly; otherwise it is null and you show nothing. Every
+option comes from products that actually matched, so no chip leads to an empty
+result.
+
+To answer a tap, send `option.send` as the next `query` with the message the
+question came from in `history`:
+
+```dart
+await search(query: option.send, history: [previousQuery]);
+```
+
+That is the ordinary refinement call. There is nothing new to store.
+
+**`seller_offers`** appear only when `match_count == 0`. They are sellers'
+made-to-order offerings, not catalogue products: no stock, no colour, no
+delivery promise. Each carries a `label` in the customer's language saying
+exactly that. Show them in their own section under the alternatives, never in
+the results list.
+
+**`personalized`** is true when this customer's own purchase history broke ties
+in the ordering. It never changes which products match. Showing a quiet "based
+on what you bought before" line is honest; hiding it is not.
+
+## POST /v1/intake/service
+
+Reads a described problem into the marketplace's own services. Nothing is
+created; the app still inserts the service request itself.
+
+```jsonc
+// request
+{"description": "باب الدولاب اتكسر", "history": []}
+
+// response
+{
+  "language": "ar",
+  "services": [
+    {"id": "…", "name": "Repair", "description": "Fix what broke",
+     "confidence": "0.85"}
+  ],
+  "clarification": null
+}
+```
+
+Every `id` is a real row from `service_type`, read with the customer's own
+token. An empty `services` list means the marketplace does not offer it: say
+so, do not fall back to a guess. `confidence` is a decimal string like every
+other decimal here. Errors add one code to the usual set: 503
+`service_directory_unavailable`.
+
+Use it to preselect the service type on the request form, and let the customer
+change it. Two or three middling confidences mean the model is unsure; show the
+list.
+
+## POST /v1/intake/furnishing
+
+Reads a furnishing job into the request form's fields.
+
+```jsonc
+// request
+{"description": "عايز أفرش شقة أوضتين نوم وريسبشن بـ ١٥٠ ألف"}
+
+// response
+{
+  "language": "ar",
+  "rooms": [
+    {"room_type": {"slug": "bedroom", "label": "غرفة نوم"}, "quantity": 2},
+    {"room_type": {"slug": "reception", "label": "ريسبشن"}, "quantity": 1}
+  ],
+  "total_budget": "150000",
+  "styles": [{"slug": "modern", "label": "مودرن"}],
+  "feels": [],
+  "unresolved": [],
+  "clarification": null
+}
+```
+
+`total_budget` is a decimal string or null, and it is for the whole job.
+`unresolved` lists words the vocabularies did not recognise; show them back to
+the customer rather than dropping them silently, because the parser refused to
+guess what they meant.
+
+Both endpoints take the same `history` as search (at most 4 earlier messages),
+are rate limited per user (`limits.intake_per_minute` from `GET /v1/meta`), and
+cache identical requests for 15 minutes.
+
+## GET /v1/meta and the vocabulary
+
+`features` gained `service_triage` and `furnishing_brief`; `limits` gained
+`intake_per_minute`. `GET /v1/search/vocabulary` gained `styles`, `room_types`
+and `feels`. A chip built from those three ranks results rather than filtering
+them, which is worth saying on the screen if the chips look like filters.

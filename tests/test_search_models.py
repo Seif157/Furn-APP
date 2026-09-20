@@ -30,7 +30,7 @@ def test_master_plan_example_builds_into_a_valid_specification() -> None:
     assert spec.hard.in_stock_only is True
     assert spec.soft.colours == ("beige",)
     assert spec.soft.styles == ("modern",)
-    assert spec.soft.room_type == "living room"
+    assert spec.soft.room_type == "living_room"
     assert spec.query is not None and spec.query.language == "en"
     assert spec.limit == 20
     assert spec.schema_version == 1
@@ -113,21 +113,28 @@ def test_ranges_accept_single_or_ordered_bounds() -> None:
     assert search.DimensionRange(maximum_cm=Decimal("0.5")).minimum_cm is None
 
 
-def test_soft_preferences_require_normalized_text_and_positive_targets() -> None:
+def test_soft_preferences_require_known_slugs_and_positive_targets() -> None:
     with pytest.raises(ValidationError):
-        search.SoftPreferences(styles=("Modern",))  # not normalized
+        search.SoftPreferences(styles=("Modern",))  # a label, not a slug
+    with pytest.raises(ValidationError):
+        search.SoftPreferences(styles=("مودرن",))  # a surface form, not a slug
     with pytest.raises(ValidationError):
         search.SoftPreferences(styles=("modern", "modern"))
     with pytest.raises(ValidationError):
+        search.SoftPreferences(feels=("comfy",))  # not a vocabulary feel
+    with pytest.raises(ValidationError):
         search.SoftPreferences(room_type="")
+    with pytest.raises(ValidationError):
+        search.SoftPreferences(room_type="living room")  # the label of a slug
     with pytest.raises(ValidationError):
         search.SoftPreferences(preferred_width_cm=Decimal("-1"))
     with pytest.raises(ValidationError):
         search.SoftPreferences(target_price=Decimal("0"))
-    assert search.SoftPreferences(styles=("modern", "مودرن")).styles == (
-        "modern",
-        "مودرن",
-    )
+    # Both languages reach the same slug, which is the point of resolving
+    # styles through a vocabulary instead of comparing raw text.
+    build = search.build_specification(styles=("Modern", "مودرن"), query="x")
+    assert build.specification.soft.styles == ("modern",)
+    assert build.unresolved == ()
 
 
 def test_specification_needs_some_signal_and_bounded_limit() -> None:

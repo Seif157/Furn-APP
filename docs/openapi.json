@@ -766,6 +766,126 @@
           }
         }
       }
+    },
+    "/v1/intake/service": {
+      "post": {
+        "tags": [
+          "intake"
+        ],
+        "summary": "Classify Service Request",
+        "description": "Match a described problem to the services the marketplace really offers.",
+        "operationId": "classify_service_request_v1_intake_service_post",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceTriageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/intake/furnishing": {
+      "post": {
+        "tags": [
+          "intake"
+        ],
+        "summary": "Read Furnishing Brief",
+        "description": "Read a furnishing job into the fields the request form already has.",
+        "operationId": "read_furnishing_brief_v1_intake_furnishing_post",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -796,6 +916,96 @@
         ],
         "title": "AlternativeResponse",
         "description": "A real product that missed, and exactly what it missed by.\n\nOffered only when nothing matched. Section 6.10 allows nearest real\nalternatives and forbids fabricating a product; these are catalogue rows\nthat failed the fewest constraints, with the shortfall stated plainly so a\ncustomer can decide whether to relax."
+      },
+      "BriefResponse": {
+        "properties": {
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "rooms": {
+            "items": {
+              "$ref": "#/components/schemas/BriefRoomResponse"
+            },
+            "type": "array",
+            "title": "Rooms"
+          },
+          "total_budget": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Budget"
+          },
+          "styles": {
+            "items": {
+              "$ref": "#/components/schemas/app__search__responses__TermResponse"
+            },
+            "type": "array",
+            "title": "Styles"
+          },
+          "feels": {
+            "items": {
+              "$ref": "#/components/schemas/app__search__responses__TermResponse"
+            },
+            "type": "array",
+            "title": "Feels"
+          },
+          "unresolved": {
+            "items": {
+              "$ref": "#/components/schemas/UnresolvedResponse"
+            },
+            "type": "array",
+            "title": "Unresolved"
+          },
+          "clarification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarification"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "language",
+          "rooms",
+          "total_budget",
+          "styles",
+          "feels",
+          "unresolved",
+          "clarification"
+        ],
+        "title": "BriefResponse",
+        "description": "A furnishing job read into the request form's own fields."
+      },
+      "BriefRoomResponse": {
+        "properties": {
+          "room_type": {
+            "$ref": "#/components/schemas/app__search__responses__TermResponse"
+          },
+          "quantity": {
+            "type": "integer",
+            "title": "Quantity"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "room_type",
+          "quantity"
+        ],
+        "title": "BriefRoomResponse"
       },
       "CartResponse": {
         "properties": {
@@ -1089,6 +1299,14 @@
           "public_reviews": {
             "type": "boolean",
             "title": "Public Reviews"
+          },
+          "service_triage": {
+            "type": "boolean",
+            "title": "Service Triage"
+          },
+          "furnishing_brief": {
+            "type": "boolean",
+            "title": "Furnishing Brief"
           }
         },
         "additionalProperties": false,
@@ -1099,9 +1317,64 @@
           "room_preview",
           "compare",
           "similar_products",
-          "public_reviews"
+          "public_reviews",
+          "service_triage",
+          "furnishing_brief"
         ],
         "title": "FeaturesResponse"
+      },
+      "FollowUpOptionResponse": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "send": {
+            "type": "string",
+            "title": "Send"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "value",
+          "label",
+          "send"
+        ],
+        "title": "FollowUpOptionResponse",
+        "description": "One tappable answer to the follow-up question."
+      },
+      "FollowUpResponse": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/FollowUpOptionResponse"
+            },
+            "type": "array",
+            "title": "Options"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "field",
+          "question",
+          "options"
+        ],
+        "title": "FollowUpResponse",
+        "description": "A question with answers the customer can tap. Phase 7A.\n\nPresent only when asking is worth it: the sentence was too vague to search,\nor it named no kind of furniture and matched broadly. Every option is built\nfrom products that actually matched, so tapping one cannot lead nowhere."
       },
       "HTTPValidationError": {
         "properties": {
@@ -1142,6 +1415,34 @@
         ],
         "title": "HealthResponse",
         "description": "Strict response schema for the service health check."
+      },
+      "IntakeRequest": {
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "history": {
+            "items": {
+              "type": "string",
+              "maxLength": 500,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "History",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "description"
+        ],
+        "title": "IntakeRequest",
+        "description": "One description, bounded before a provider call is spent."
       },
       "InterpretationResponse": {
         "properties": {
@@ -1229,21 +1530,27 @@
           },
           "styles": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/app__search__responses__TermResponse"
             },
             "type": "array",
             "title": "Styles"
           },
+          "feels": {
+            "items": {
+              "$ref": "#/components/schemas/app__search__responses__TermResponse"
+            },
+            "type": "array",
+            "title": "Feels"
+          },
           "room_type": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/app__search__responses__TermResponse"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Room Type"
+            ]
           }
         },
         "additionalProperties": false,
@@ -1260,6 +1567,7 @@
           "preferred_colours",
           "preferred_materials",
           "styles",
+          "feels",
           "room_type"
         ],
         "title": "InterpretationResponse",
@@ -1307,6 +1615,10 @@
           "max_similar_products": {
             "type": "integer",
             "title": "Max Similar Products"
+          },
+          "intake_per_minute": {
+            "type": "integer",
+            "title": "Intake Per Minute"
           }
         },
         "additionalProperties": false,
@@ -1321,7 +1633,8 @@
           "max_room_pieces",
           "max_piece_quantity",
           "max_compared_products",
-          "max_similar_products"
+          "max_similar_products",
+          "intake_per_minute"
         ],
         "title": "LimitsResponse"
       },
@@ -1777,6 +2090,15 @@
           "text": {
             "type": "string",
             "title": "Text"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "catalogue",
+              "inferred"
+            ],
+            "title": "Basis",
+            "default": "catalogue"
           }
         },
         "additionalProperties": false,
@@ -2283,6 +2605,16 @@
             ],
             "title": "Clarification"
           },
+          "follow_up": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FollowUpResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "unresolved": {
             "items": {
               "$ref": "#/components/schemas/UnresolvedResponse"
@@ -2303,6 +2635,17 @@
             },
             "type": "array",
             "title": "Alternatives"
+          },
+          "seller_offers": {
+            "items": {
+              "$ref": "#/components/schemas/SellerOfferResponse"
+            },
+            "type": "array",
+            "title": "Seller Offers"
+          },
+          "personalized": {
+            "type": "boolean",
+            "title": "Personalized"
           }
         },
         "additionalProperties": false,
@@ -2318,11 +2661,69 @@
           "truncated",
           "has_more",
           "clarification",
+          "follow_up",
           "unresolved",
           "excluded_by",
-          "alternatives"
+          "alternatives",
+          "seller_offers",
+          "personalized"
         ],
         "title": "SearchResponse"
+      },
+      "SellerOfferResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "description",
+          "price",
+          "seller_id",
+          "label"
+        ],
+        "title": "SellerOfferResponse",
+        "description": "A seller's made-to-order offering, shown only when nothing matched.\n\nNot a catalogue product: there is no stock, colour or delivery promise\nhere, which is why it travels in its own list with its own label instead of\namong the results. Section 6.10."
       },
       "SellerResponse": {
         "properties": {
@@ -2343,6 +2744,80 @@
           "business_name"
         ],
         "title": "SellerResponse"
+      },
+      "ServiceMatchResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "confidence": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Confidence"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "confidence"
+        ],
+        "title": "ServiceMatchResponse",
+        "description": "A real service from the marketplace's own directory.\n\n``id`` and ``name`` are the row's own values, read with the customer's\ntoken. ``confidence`` is the model's, and is the only judgement here."
+      },
+      "ServiceTriageResponse": {
+        "properties": {
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceMatchResponse"
+            },
+            "type": "array",
+            "title": "Services"
+          },
+          "clarification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarification"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "language",
+          "services",
+          "clarification"
+        ],
+        "title": "ServiceTriageResponse",
+        "description": "Which services fit a described problem. Nothing is created."
       },
       "SimilarItemResponse": {
         "properties": {
@@ -2604,6 +3079,27 @@
             },
             "type": "array",
             "title": "Materials"
+          },
+          "styles": {
+            "items": {
+              "$ref": "#/components/schemas/app__routers__meta__TermResponse"
+            },
+            "type": "array",
+            "title": "Styles"
+          },
+          "room_types": {
+            "items": {
+              "$ref": "#/components/schemas/app__routers__meta__TermResponse"
+            },
+            "type": "array",
+            "title": "Room Types"
+          },
+          "feels": {
+            "items": {
+              "$ref": "#/components/schemas/app__routers__meta__TermResponse"
+            },
+            "type": "array",
+            "title": "Feels"
           }
         },
         "additionalProperties": false,
@@ -2611,7 +3107,10 @@
         "required": [
           "categories",
           "colours",
-          "materials"
+          "materials",
+          "styles",
+          "room_types",
+          "feels"
         ],
         "title": "VocabularyResponse"
       },

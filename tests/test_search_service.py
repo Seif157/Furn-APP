@@ -253,7 +253,7 @@ def test_query_overlap_matches_bilingual_terms_and_normalized_text() -> None:
 
 
 def test_room_preference_only_matches_confirmed_room_attributes() -> None:
-    soft = models.SoftPreferences(room_type="living room")
+    soft = models.SoftPreferences(room_type="living_room")
     assert ranking.score_parts(CATALOGUE[0], soft, None)[0].value == Decimal("1")
     assert ranking.score_parts(CATALOGUE[1], soft, None)[0].value == Decimal("0")
 

@@ -28,7 +28,7 @@ from fastapi import HTTPException, Request, status
 from app.search.localization import message
 from app.search.models import Language
 
-Bucket = Literal["search", "room_plan", "room_image"]
+Bucket = Literal["search", "room_plan", "room_image", "intake"]
 
 
 @dataclass(frozen=True, slots=True)

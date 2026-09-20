@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from app.catalog.models import ProductResponse, StrictResponseModel
 
 
@@ -16,6 +18,14 @@ class ReasonResponse(StrictResponseModel):
 
     code: str
     text: str
+    basis: Literal["catalogue", "inferred"] = "catalogue"
+    """Which kind of statement this is.
+
+    "catalogue" restates something the marketplace holds: a price, a width, a
+    material, a colour in stock. "inferred" is the platform's own guess about
+    style, room or feel, which no seller states. Section 6.6 requires the two
+    to stay separate, so they are separate here rather than in the wording
+    alone, and a client can style or hide a guess."""
 
 
 class AlternativeResponse(StrictResponseModel):

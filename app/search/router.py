@@ -33,6 +33,9 @@ from app.catalog.dependencies import (
     catalogue_service_unavailable,
     catalogue_upstream_error,
     get_catalogue_gateway,
+    get_offering_gateway,
+    get_purchase_history_gateway,
+    get_search_tag_gateway,
 )
 from app.catalog.gateway import (
     CatalogueGateway,
@@ -40,10 +43,14 @@ from app.catalog.gateway import (
     CatalogueUpstreamError,
 )
 from app.catalog.normalization import normalize_product
+from app.catalog.tags import SearchTagGateway, attach_inferred_tags
 from app.catalog.transform import is_recommendation_eligible
 from app.core.cache import cache_key, get_ai_caches
 from app.core.limits import enforce_rate_limit
+from app.personalization.gateway import PurchaseHistoryGateway
+from app.personalization.service import taste_profile
 from app.recommendations.alternatives import nearest_alternatives
+from app.recommendations.offerings import OfferingGateway
 from app.search.dependencies import (
     get_optional_ai_provider,
     invalid_search_query,
@@ -96,6 +103,11 @@ async def search(
         Depends(get_authenticated_request),
     ],
     gateway: Annotated[CatalogueGateway, Depends(get_catalogue_gateway)],
+    tag_gateway: Annotated[SearchTagGateway | None, Depends(get_search_tag_gateway)],
+    history_gateway: Annotated[
+        PurchaseHistoryGateway | None, Depends(get_purchase_history_gateway)
+    ],
+    offering_gateway: Annotated[OfferingGateway | None, Depends(get_offering_gateway)],
     provider: Annotated[AIProvider | None, Depends(get_optional_ai_provider)],
 ) -> SearchResponse:
     """Parse one sentence, then rank the products the caller is allowed to see."""
@@ -170,8 +182,26 @@ async def search(
     )
 
     normalized = tuple(normalize_product(product) for product in candidates)
+    # Style, room and feel are nobody's stated fact, so they arrive separately
+    # and only when the sentence asked for one. A failed fetch is silent by
+    # design: it costs ranking quality, never correctness.
+    normalized = await attach_inferred_tags(
+        normalized,
+        gateway=tag_gateway,
+        authenticated_request=authenticated_request,
+        specification=parsed.specification,
+    )
+    # What this customer bought before, cached per user. It can only break
+    # ties among products that already satisfy every stated constraint, and the
+    # response says when it did; see app/personalization/profile.py.
+    profile = await taste_profile(
+        authenticated_request=authenticated_request,
+        history=history_gateway,
+        catalogue=gateway,
+        caches=caches,
+    )
     try:
-        results = search_products(normalized, parsed.specification)
+        results = search_products(normalized, parsed.specification, profile)
     except ValueError:
         # Duplicate ids or an oversized candidate set: a catalogue problem, not
         # a client one.
@@ -185,9 +215,17 @@ async def search(
         if results.match_count == 0
         else ()
     )
+    # Section 6.10's labelled seller half, on the same condition and in its own
+    # list. Never shown beside real matches.
+    offers = (
+        await offering_gateway.published(authenticated_request=authenticated_request)
+        if results.match_count == 0 and offering_gateway is not None
+        else ()
+    )
 
     return build_search_response(
         candidates,
+        normalized=normalized,
         results=results,
         specification=parsed.specification,
         query=search_request.query,
@@ -196,4 +234,11 @@ async def search(
         unresolved=parsed.unresolved,
         truncated=truncated,
         alternatives=alternatives,
+        offers=offers,
+        personalized=profile is not None
+        and any(
+            part.component == "taste" and part.value > 0
+            for item in results.items
+            for part in item.parts
+        ),
     )

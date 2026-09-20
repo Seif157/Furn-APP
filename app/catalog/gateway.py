@@ -82,6 +82,14 @@ class CatalogueGateway(Protocol):
     ) -> UpstreamProduct | None:
         """Fetch one eligible product by UUID."""
 
+    async def list_by_ids(
+        self,
+        *,
+        authenticated_request: AuthenticatedRequestContext,
+        product_ids: tuple[UUID, ...],
+    ) -> tuple[UpstreamProduct, ...]:
+        """Fetch the eligible products among these ids, in catalogue order."""
+
 
 class SupabaseCatalogueGateway:
     """Retrieve explicitly filtered product records through PostgREST."""
@@ -131,6 +139,29 @@ class SupabaseCatalogueGateway:
             params=params,
         )
         return products[0] if products else None
+
+    async def list_by_ids(
+        self,
+        *,
+        authenticated_request: AuthenticatedRequestContext,
+        product_ids: tuple[UUID, ...],
+    ) -> tuple[UpstreamProduct, ...]:
+        """Fetch several products at once, under the same eligibility filters.
+
+        Used to look up products a customer already bought. An id that is no
+        longer published, or never was visible to this caller, simply does not
+        come back, which is the same answer the catalogue endpoints give.
+        """
+
+        if not product_ids:
+            return ()
+        params = catalogue_query_params()
+        identifiers = ",".join(str(product_id) for product_id in product_ids)
+        params.update({"id": f"in.({identifiers})", "limit": str(len(product_ids))})
+        return await self._request_products(
+            authenticated_request=authenticated_request,
+            params=params,
+        )
 
     async def _request_products(
         self,

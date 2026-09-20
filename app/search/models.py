@@ -5,8 +5,11 @@ satisfy, from soft preferences, which only influence ranking. Every field maps
 to something the Phase 4B ``NormalizedProduct`` can answer today: category,
 colour, and material slugs from the controlled vocabularies, price and
 dimension ranges in the catalogue's own units, and stock. Weight is not a
-constraint because the audit found it null on every product, and styles, room
-types, and finishes are soft only because the enrichment tables are empty.
+constraint because the audit found it null on every product.
+
+Style, room type and feel are slugs too, but they stay soft for a different
+reason: no seller states them, so they are matched against platform-inferred
+tags. A guess may order results; it may never exclude a product.
 
 The models are strict and frozen. Slugs are validated against the vocabularies
 so an unknown value is rejected at construction, never silently ignored. The
@@ -25,7 +28,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.catalog.normalization import (
     CATEGORIES,
     COLOURS,
+    FEELS,
     MATERIALS,
+    ROOM_TYPES,
+    STYLES,
     Vocabulary,
     has_arabic,
     has_latin,
@@ -46,6 +52,9 @@ SpecificationField = Literal[
     "materials",
     "preferred_colours",
     "preferred_materials",
+    "styles",
+    "room_type",
+    "feels",
 ]
 
 
@@ -172,8 +181,10 @@ class SoftPreferences(StrictModel):
     colours: tuple[str, ...] = ()
     materials: tuple[str, ...] = ()
     styles: tuple[str, ...] = ()
-    """Normalized free text; matched against confirmed enrichment attributes."""
+    """Style slugs, matched against confirmed enrichment and inferred tags."""
     room_type: str | None = None
+    feels: tuple[str, ...] = ()
+    """How the customer wants it to feel. Only inferred tags can answer these."""
     preferred_width_cm: Decimal | None = None
     preferred_height_cm: Decimal | None = None
     preferred_depth_cm: Decimal | None = None
@@ -191,21 +202,19 @@ class SoftPreferences(StrictModel):
 
     @field_validator("styles")
     @classmethod
-    def _normalized_styles(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if len(value) > MAX_TERMS:
-            raise ValueError(f"at most {MAX_TERMS} styles")
-        for style in value:
-            if not style or style != normalize_text(style):
-                raise ValueError("styles must be normalized, non-empty text")
-        if len(set(value)) != len(value):
-            raise ValueError("duplicate style")
-        return value
+    def _known_styles(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _validate_slugs(STYLES, value)
+
+    @field_validator("feels")
+    @classmethod
+    def _known_feels(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _validate_slugs(FEELS, value)
 
     @field_validator("room_type")
     @classmethod
-    def _normalized_room(cls, value: str | None) -> str | None:
-        if value is not None and (not value or value != normalize_text(value)):
-            raise ValueError("room_type must be normalized, non-empty text")
+    def _known_room(cls, value: str | None) -> str | None:
+        if value is not None:
+            _validate_slugs(ROOM_TYPES, (value,))
         return value
 
     @field_validator("preferred_width_cm", "preferred_height_cm", "preferred_depth_cm")
@@ -331,6 +340,7 @@ def build_specification(
     preferred_materials: Iterable[str] = (),
     styles: Iterable[str] = (),
     room_type: str | None = None,
+    feels: Iterable[str] = (),
     preferred_width_cm: Decimal | None = None,
     preferred_height_cm: Decimal | None = None,
     preferred_depth_cm: Decimal | None = None,
@@ -349,6 +359,11 @@ def build_specification(
     if category is not None:
         (category_slug, *_rest) = _resolve(
             CATEGORIES, (category,), field="category", unresolved=unresolved
+        ) or (None,)
+    room_slug: str | None = None
+    if room_type is not None:
+        (room_slug, *_rest) = _resolve(
+            ROOM_TYPES, (room_type,), field="room_type", unresolved=unresolved
         ) or (None,)
     specification = SearchSpecification(
         hard=HardConstraints(
@@ -376,12 +391,9 @@ def build_specification(
                 field="preferred_materials",
                 unresolved=unresolved,
             ),
-            styles=tuple(
-                dict.fromkeys(
-                    normalize_text(style) for style in styles if style.strip()
-                )
-            ),
-            room_type=normalize_text(room_type) if room_type else None,
+            styles=_resolve(STYLES, styles, field="styles", unresolved=unresolved),
+            feels=_resolve(FEELS, feels, field="feels", unresolved=unresolved),
+            room_type=room_slug,
             preferred_width_cm=preferred_width_cm,
             preferred_height_cm=preferred_height_cm,
             preferred_depth_cm=preferred_depth_cm,

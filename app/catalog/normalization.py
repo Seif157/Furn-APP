@@ -21,7 +21,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from app.catalog.upstream_models import UpstreamEnrichmentAssignment, UpstreamProduct
 
@@ -294,6 +294,203 @@ MATERIALS = Vocabulary(
 )
 
 
+# Styles, room types and feels describe how a product looks and where it goes.
+# No seller types them in, so they are inferred by the platform and kept apart
+# from seller facts (app/catalog/tags.py). The vocabulary exists so that the
+# customer's word and the inferred tag land on the same slug: without it
+# "مودرن" and "modern" are two unrelated strings and the match never happens.
+STYLES = Vocabulary(
+    "style",
+    (
+        VocabularyTerm(
+            "modern",
+            "modern",
+            "مودرن",
+            ("contemporary", "عصري", "حديث", "modern style"),
+        ),
+        VocabularyTerm(
+            "classic",
+            "classic",
+            "كلاسيك",
+            ("classical", "كلاسيكي", "traditional", "تقليدي"),
+        ),
+        VocabularyTerm(
+            "neoclassic",
+            "neoclassic",
+            "نيوكلاسيك",
+            ("neo classic", "neo-classic", "neoclassical"),
+        ),
+        VocabularyTerm(
+            "scandinavian",
+            "scandinavian",
+            "إسكندنافي",
+            ("scandi", "nordic", "اسكندنافي", "سكندنافي"),
+        ),
+        VocabularyTerm(
+            "minimal",
+            "minimal",
+            "بسيط",
+            ("minimalist", "simple", "مينيمال", "بساطة"),
+        ),
+        VocabularyTerm(
+            "industrial",
+            "industrial",
+            "إندستريال",
+            ("loft", "اندستريال", "صناعي"),
+        ),
+        VocabularyTerm(
+            "rustic",
+            "rustic",
+            "ريفي",
+            ("farmhouse", "country", "كانتري"),
+        ),
+        VocabularyTerm(
+            "boho",
+            "boho",
+            "بوهيمي",
+            ("bohemian", "بوهو"),
+        ),
+        VocabularyTerm(
+            "oriental",
+            "oriental",
+            "شرقي",
+            ("arabesque", "أرابيسك", "ارابيسك", "eastern"),
+        ),
+        VocabularyTerm(
+            "art_deco",
+            "art deco",
+            "آرت ديكو",
+            ("art-deco", "artdeco", "ارت ديكو"),
+        ),
+    ),
+)
+
+ROOM_TYPES = Vocabulary(
+    "room type",
+    (
+        VocabularyTerm(
+            "living_room",
+            "living room",
+            "غرفة معيشة",
+            ("living", "lounge", "ليفنج", "معيشة", "صالة", "living-room"),
+        ),
+        # Egypt sells the formal sitting room as a reception, and the entrance
+        # set as an antrée. Both are the room a customer names out loud.
+        VocabularyTerm(
+            "reception",
+            "reception",
+            "ريسبشن",
+            ("انتريه", "أنتريه", "antre", "formal living room", "استقبال"),
+        ),
+        VocabularyTerm(
+            "bedroom",
+            "bedroom",
+            "غرفة نوم",
+            ("bed room", "نوم", "master bedroom", "غرفة النوم"),
+        ),
+        VocabularyTerm(
+            "kids_room",
+            "kids room",
+            "غرفة أطفال",
+            ("children room", "nursery", "أطفال", "اطفال", "kids", "غرفة اطفال"),
+        ),
+        VocabularyTerm(
+            "dining_room",
+            "dining room",
+            "غرفة سفرة",
+            ("dining", "سفرة", "غرفة طعام", "dining-room"),
+        ),
+        VocabularyTerm(
+            "home_office",
+            "home office",
+            "مكتب منزلي",
+            ("office", "مكتب", "study", "دراسة", "work from home"),
+        ),
+        VocabularyTerm(
+            "guest_room",
+            "guest room",
+            "غرفة ضيوف",
+            ("guests", "ضيوف", "spare room"),
+        ),
+        VocabularyTerm(
+            "balcony",
+            "balcony",
+            "بلكونة",
+            ("terrace", "تراس", "outdoor", "خارجي", "شرفة"),
+        ),
+        VocabularyTerm(
+            "hallway",
+            "hallway",
+            "مدخل",
+            ("entrance", "corridor", "ممر"),
+        ),
+    ),
+)
+
+# A feel is what the customer wants the room to be like, not what the product
+# is made of. It is the fuzzy half of search: nothing in the catalogue answers
+# "cosy", so it can only ever rank, never filter.
+FEELS = Vocabulary(
+    "feel",
+    (
+        VocabularyTerm(
+            "cosy",
+            "cosy",
+            "دافئ ومريح",
+            ("cozy", "snug", "مريح", "دافي", "كوزي"),
+        ),
+        VocabularyTerm(
+            "luxury",
+            "luxurious",
+            "فخم",
+            ("luxury", "premium", "فاخر", "لوكس", "high end", "راقي"),
+        ),
+        VocabularyTerm(
+            "warm",
+            "warm",
+            "دافئ",
+            ("warm tones", "ألوان دافئة", "دافيء"),
+        ),
+        VocabularyTerm(
+            "airy",
+            "airy",
+            "واسع ومضيء",
+            ("bright", "light", "مضيء", "منور", "spacious feel"),
+        ),
+        VocabularyTerm(
+            "calm",
+            "calm",
+            "هادئ",
+            ("serene", "relaxing", "مريح للأعصاب", "هادي"),
+        ),
+        VocabularyTerm(
+            "hotel_like",
+            "hotel-like",
+            "زي الفنادق",
+            ("hotel", "hotel style", "فندقي", "زي الفندق"),
+        ),
+        VocabularyTerm(
+            "family_friendly",
+            "family friendly",
+            "مناسب للعيلة",
+            ("kid friendly", "للأطفال", "عملي للعيلة", "practical for family"),
+        ),
+        VocabularyTerm(
+            "space_saving",
+            "space saving",
+            "موفر للمساحة",
+            ("compact", "small space", "مساحة صغيرة", "صغير الحجم", "يوفر مساحة"),
+        ),
+        VocabularyTerm(
+            "statement",
+            "statement",
+            "لافت",
+            ("bold", "eye catching", "جريء", "مميز"),
+        ),
+    ),
+)
+
+
 class FrozenModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -331,6 +528,48 @@ class NormalizedAttribute(FrozenModel):
     value_normalized: str
 
 
+TagKind = Literal["style", "room_type", "feel"]
+
+TAG_VOCABULARIES: dict[str, Vocabulary] = {
+    "style": STYLES,
+    "room_type": ROOM_TYPES,
+    "feel": FEELS,
+}
+
+MAX_TAG_CONFIDENCE = Decimal("1")
+
+
+class InferredTag(FrozenModel):
+    """A platform guess about how a product looks, reads, or feels.
+
+    It is not a seller fact and is never shown as one. No seller types a style
+    in, so the alternative is not better data, it is none: without these tags
+    "cosy" and "hotel-like" cannot rank anything at all. The confidence travels
+    with the tag so ranking can prefer a sure guess to a shaky one, and so a
+    guess can never outweigh something the seller actually stated.
+    """
+
+    kind: TagKind
+    slug: str
+    confidence: Decimal
+
+    @field_validator("confidence")
+    @classmethod
+    def _bounded(cls, value: Decimal) -> Decimal:
+        if not value.is_finite() or value <= 0 or value > MAX_TAG_CONFIDENCE:
+            raise ValueError("confidence must be within (0, 1]")
+        return value
+
+    @model_validator(mode="after")
+    def _known_slug(self) -> InferredTag:
+        vocabulary = TAG_VOCABULARIES[self.kind]
+        try:
+            vocabulary.term(self.slug)
+        except KeyError:
+            raise ValueError(f"unknown {self.kind} slug") from None
+        return self
+
+
 class NormalizedProduct(FrozenModel):
     id: UUID
     name: TextField
@@ -346,6 +585,8 @@ class NormalizedProduct(FrozenModel):
     discount_price: Decimal | None
     effective_price: Decimal
     attributes: tuple[NormalizedAttribute, ...]
+    tags: tuple[InferredTag, ...] = ()
+    """Inferred, never stated. Empty until the tag table is populated."""
     search_terms: tuple[str, ...]
     unmapped_terms: tuple[str, ...]
     schema_version: Literal[1]
@@ -451,3 +692,15 @@ def normalize_product(product: UpstreamProduct) -> NormalizedProduct:
         unmapped_terms=tuple(sorted(unmapped)),
         schema_version=1,
     )
+
+
+def with_tags(
+    product: NormalizedProduct, tags: tuple[InferredTag, ...]
+) -> NormalizedProduct:
+    """Attach inferred tags to a normalized product, deterministically ordered."""
+
+    ordered = tuple(sorted(tags, key=lambda tag: (tag.kind, tag.slug, -tag.confidence)))
+    deduplicated: dict[tuple[str, str], InferredTag] = {}
+    for tag in ordered:
+        deduplicated.setdefault((tag.kind, tag.slug), tag)
+    return product.model_copy(update={"tags": tuple(deduplicated.values())})

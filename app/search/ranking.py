@@ -11,7 +11,14 @@ from __future__ import annotations
 import re
 from decimal import ROUND_HALF_UP, Decimal
 
-from app.catalog.normalization import NormalizedProduct, normalize_text
+from app.catalog.normalization import (
+    FEELS,
+    ROOM_TYPES,
+    STYLES,
+    NormalizedProduct,
+    Vocabulary,
+)
+from app.personalization.profile import TasteProfile
 from app.search.models import QueryText, SoftPreferences
 from app.search.results import ScorePart
 
@@ -19,20 +26,85 @@ WEIGHTS: dict[str, Decimal] = {
     "colours": Decimal("2"),
     "materials": Decimal("2"),
     "styles": Decimal("1.5"),
+    "feels": Decimal("1.25"),
     "room_type": Decimal("1"),
     "width": Decimal("1"),
     "height": Decimal("1"),
     "depth": Decimal("1"),
     "price": Decimal("1.5"),
     "query": Decimal("1"),
+    # A tie-breaker, and nothing more. What someone bought last year must never
+    # outweigh what they asked for today; see app/personalization/profile.py.
+    "taste": Decimal("0.5"),
 }
 PRECISION = Decimal("0.0001")
 WORD = re.compile(r"[^\W_]+")
 ZERO = Decimal("0")
 ONE = Decimal("1")
-# Attribute kinds whose confirmed values are compared with the room preference.
+# Attribute kinds whose confirmed values are compared with the preference.
 ROOM_KINDS = frozenset({"room", "room_type", "room type"})
 STYLE_KINDS = frozenset({"style", "styles", "design_style"})
+FEEL_KINDS = frozenset({"feel", "feels", "mood"})
+
+SOFT_DIMENSIONS = {
+    "styles": (STYLE_KINDS, "style", STYLES),
+    "feels": (FEEL_KINDS, "feel", FEELS),
+    "room_type": (ROOM_KINDS, "room_type", ROOM_TYPES),
+}
+"""The three dimensions no seller states: confirmed kinds, tag kind, vocabulary.
+
+Ranking and the explanations read the same table, so a product can never be
+ranked for a style the customer is not told about, or told about one that did
+not count."""
+
+INFERRED_CEILING = Decimal("0.8")
+"""The most an inferred tag can contribute.
+
+A style the seller confirmed scores 1. A style the platform guessed scores its
+confidence, capped below 1, so a product whose seller said "modern" always
+outranks one we merely think looks modern. The customer sees which is which in
+the reasons; the arithmetic agrees with what they are told.
+"""
+
+
+def dimension_strengths(
+    product: NormalizedProduct,
+    *,
+    confirmed_kinds: frozenset[str],
+    tag_kind: str,
+    vocabulary: Vocabulary,
+) -> dict[str, Decimal]:
+    """How strongly a product carries each slug of one soft dimension.
+
+    Confirmed enrichment resolves through the same vocabulary as the query, so
+    a seller who wrote "مودرن" and a customer who typed "modern" meet.
+    """
+
+    strengths: dict[str, Decimal] = {}
+    for attribute in product.attributes:
+        if attribute.kind not in confirmed_kinds:
+            continue
+        term = vocabulary.lookup(attribute.value_original)
+        if term is not None:
+            strengths[term.slug] = ONE
+    for tag in product.tags:
+        if tag.kind != tag_kind:
+            continue
+        value = min(tag.confidence, INFERRED_CEILING)
+        if strengths.get(tag.slug, ZERO) < value:
+            strengths[tag.slug] = value
+    return strengths
+
+
+def _preference_value(
+    strengths: dict[str, Decimal], wanted: tuple[str, ...]
+) -> Decimal:
+    """Mean strength across everything asked for; a missing slug counts zero."""
+
+    if not wanted:
+        return ZERO
+    total = sum((strengths.get(slug, ZERO) for slug in wanted), ZERO)
+    return (total / Decimal(len(wanted))).quantize(PRECISION, rounding=ROUND_HALF_UP)
 
 
 def _fraction(hits: int, total: int) -> Decimal:
@@ -203,10 +275,37 @@ def matched_query_words(
     )
 
 
+def _taste_value(product: NormalizedProduct, profile: TasteProfile) -> Decimal | None:
+    """How much this product looks like what the customer has bought before.
+
+    Only the dimensions the profile actually has an opinion about count, so a
+    customer whose history says nothing about materials is not penalised on
+    them.
+    """
+
+    signals: list[Decimal] = []
+    if profile.colours:
+        in_stock = {c.slug for c in product.colours if c.stock_quantity > 0 and c.slug}
+        signals.append(ONE if in_stock & profile.colours else ZERO)
+    if profile.materials:
+        present = {m.slug for m in product.materials if m.slug}
+        signals.append(ONE if present & profile.materials else ZERO)
+    if profile.typical_price is not None and profile.typical_price > ZERO:
+        closeness = _closeness(product.effective_price, profile.typical_price)
+        if closeness is not None:
+            signals.append(closeness)
+    if not signals:
+        return None
+    return (sum(signals, ZERO) / Decimal(len(signals))).quantize(
+        PRECISION, rounding=ROUND_HALF_UP
+    )
+
+
 def score_parts(
     product: NormalizedProduct,
     soft: SoftPreferences,
     query: QueryText | None,
+    profile: TasteProfile | None = None,
 ) -> tuple[ScorePart, ...]:
     parts: list[ScorePart] = []
 
@@ -230,13 +329,44 @@ def score_parts(
             _fraction(len(present & set(soft.materials)), len(soft.materials)),
         )
     if soft.styles:
-        styles = {
-            a.value_normalized for a in product.attributes if a.kind in STYLE_KINDS
-        }
-        add("styles", _fraction(len(styles & set(soft.styles)), len(soft.styles)))
+        add(
+            "styles",
+            _preference_value(
+                dimension_strengths(
+                    product,
+                    confirmed_kinds=STYLE_KINDS,
+                    tag_kind="style",
+                    vocabulary=STYLES,
+                ),
+                soft.styles,
+            ),
+        )
+    if soft.feels:
+        add(
+            "feels",
+            _preference_value(
+                dimension_strengths(
+                    product,
+                    confirmed_kinds=FEEL_KINDS,
+                    tag_kind="feel",
+                    vocabulary=FEELS,
+                ),
+                soft.feels,
+            ),
+        )
     if soft.room_type is not None:
-        rooms = {a.value_normalized for a in product.attributes if a.kind in ROOM_KINDS}
-        add("room_type", ONE if normalize_text(soft.room_type) in rooms else ZERO)
+        add(
+            "room_type",
+            _preference_value(
+                dimension_strengths(
+                    product,
+                    confirmed_kinds=ROOM_KINDS,
+                    tag_kind="room_type",
+                    vocabulary=ROOM_TYPES,
+                ),
+                (soft.room_type,),
+            ),
+        )
     if soft.preferred_width_cm is not None:
         add("width", _closeness(product.width_cm, soft.preferred_width_cm))
     if soft.preferred_height_cm is not None:
@@ -247,6 +377,8 @@ def score_parts(
         add("price", _closeness(product.effective_price, soft.target_price))
     if query is not None:
         add("query", _query_overlap(product, query))
+    if profile is not None and profile.is_useful:
+        add("taste", _taste_value(product, profile))
     return tuple(parts)
 
 

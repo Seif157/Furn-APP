@@ -44,6 +44,7 @@ DRAFT_FIELDS = {
     "preferred_colours",
     "preferred_materials",
     "styles",
+    "feels",
     "room_type",
     "preferred_width_cm",
     "preferred_height_cm",
@@ -153,7 +154,7 @@ def test_the_master_plan_sentence_becomes_the_expected_specification() -> None:
     assert spec.hard.in_stock_only is True
     assert spec.soft.colours == ("beige",)
     assert spec.soft.styles == ("modern",)
-    assert spec.soft.room_type == "living room"
+    assert spec.soft.room_type == "living_room"
     assert spec.query is not None and spec.query.language == "en"
 
 

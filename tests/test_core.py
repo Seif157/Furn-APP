@@ -292,6 +292,10 @@ LIFESPAN_STATE = (
     "ai_provider",
     "reference_fetcher",
     "review_gateway",
+    "search_tag_gateway",
+    "service_directory_gateway",
+    "purchase_history_gateway",
+    "offering_gateway",
     "ai_settings",
     "cart_reader",
     "cart_creator",
@@ -331,6 +335,28 @@ async def test_the_real_startup_installs_the_limiter_and_the_caches(
         for _ in range(7):
             assert limiter.check("user", "search") is None
         assert limiter.check("user", "search") is not None
+
+
+@pytest.mark.anyio
+async def test_isolation_covers_everything_the_startup_attaches(
+    monkeypatch: pytest.MonkeyPatch, isolated_state: None
+) -> None:
+    """A new lifespan attribute must be added to LIFESPAN_STATE.
+
+    Forgetting one leaves a live gateway on the shared app after this test, and
+    a later test then calls it through a closed HTTP client. That failure
+    appears in unrelated tests and only in a full run, so it is caught here.
+    """
+
+    monkeypatch.setattr(main_module, "load_settings", build_test_settings)
+    monkeypatch.setattr(
+        main_module, "load_ai_settings", lambda: AISettings(_env_file=None)
+    )
+
+    async with lifespan(app):
+        attached = set(app.state._state)
+
+    assert attached <= set(LIFESPAN_STATE), attached - set(LIFESPAN_STATE)
 
 
 @pytest.mark.anyio

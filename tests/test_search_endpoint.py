@@ -215,7 +215,7 @@ async def test_the_response_says_what_the_backend_understood() -> None:
     assert interpretation["width_cm"] == {"minimum": None, "maximum": "220"}
     assert interpretation["in_stock_only"] is True
     assert interpretation["preferred_colours"] == [{"slug": "beige", "label": "beige"}]
-    assert interpretation["styles"] == ["modern"]
+    assert interpretation["styles"] == [{"slug": "modern", "label": "modern"}]
 
 
 @pytest.mark.anyio

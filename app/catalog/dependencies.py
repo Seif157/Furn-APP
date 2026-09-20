@@ -3,6 +3,9 @@
 from fastapi import HTTPException, Request, status
 
 from app.catalog.gateway import CatalogueGateway
+from app.catalog.tags import SearchTagGateway
+from app.personalization.gateway import PurchaseHistoryGateway
+from app.recommendations.offerings import OfferingGateway
 
 
 def catalogue_upstream_error() -> HTTPException:
@@ -33,6 +36,34 @@ def product_not_found() -> HTTPException:
             "message": "The product was not found.",
         },
     )
+
+
+async def get_search_tag_gateway(request: Request) -> SearchTagGateway | None:
+    """Return the lifespan-owned tag gateway, or ``None`` when unavailable.
+
+    Absence is not an error here, unlike the catalogue: inferred tags rank
+    results, they never decide which products exist.
+    """
+
+    return getattr(request.app.state, "search_tag_gateway", None)
+
+
+async def get_purchase_history_gateway(
+    request: Request,
+) -> PurchaseHistoryGateway | None:
+    """Return the lifespan-owned history gateway, or ``None``.
+
+    Absent, searches are simply not personalized, which is what every search
+    did before Phase 9B.
+    """
+
+    return getattr(request.app.state, "purchase_history_gateway", None)
+
+
+async def get_offering_gateway(request: Request) -> OfferingGateway | None:
+    """Return the lifespan-owned offering gateway, or ``None``."""
+
+    return getattr(request.app.state, "offering_gateway", None)
 
 
 async def get_catalogue_gateway(request: Request) -> CatalogueGateway:

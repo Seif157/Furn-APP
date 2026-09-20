@@ -97,6 +97,7 @@ def specification_from_draft(
             preferred_colours=_terms(draft.preferred_colours),
             preferred_materials=_terms(draft.preferred_materials),
             styles=_terms(draft.styles),
+            feels=_terms(draft.feels),
             room_type=room_type or None,
             preferred_width_cm=_soft_value(
                 draft.preferred_width_cm, high=MAX_DIMENSION_CM

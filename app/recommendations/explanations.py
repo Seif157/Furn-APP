@@ -18,10 +18,16 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from app.catalog.normalization import CATEGORIES, COLOURS, MATERIALS
+from app.catalog.normalization import (
+    CATEGORIES,
+    COLOURS,
+    MATERIALS,
+    NormalizedProduct,
+)
 from app.recommendations.models import ReasonResponse
 from app.search.localization import response_language, term_label
-from app.search.models import HardConstraints, Language
+from app.search.models import HardConstraints, Language, SoftPreferences
+from app.search.ranking import SOFT_DIMENSIONS, dimension_strengths
 from app.search.results import ConstraintCheck
 
 CURRENCY = {"en": "EGP", "ar": "جنيه"}
@@ -156,6 +162,73 @@ def match_reasons(
             ReasonResponse(code="in_stock", text="متوفر" if arabic else "in stock")
         )
 
+    return tuple(reasons)
+
+
+# How a guess is worded, against how a seller-stated fact is worded. The
+# difference is deliberate and visible: a customer must be able to tell which
+# statements the marketplace stands behind.
+_INFERRED_PHRASING = {
+    "styles": {"en": "looks {label}", "ar": "شكله {label}"},
+    "feels": {"en": "feels {label}", "ar": "إحساسه {label}"},
+    "room_type": {"en": "suits a {label}", "ar": "مناسب لـ{label}"},
+}
+_CONFIRMED_PHRASING = {
+    "styles": {"en": "{label}", "ar": "{label}"},
+    "feels": {"en": "{label}", "ar": "{label}"},
+    "room_type": {"en": "for a {label}", "ar": "لـ{label}"},
+}
+_OUR_GUESS = {"en": " (our guess)", "ar": " (تقديرنا)"}
+
+
+def preference_reasons(
+    product: NormalizedProduct,
+    soft: SoftPreferences,
+    language: Language,
+) -> tuple[ReasonResponse, ...]:
+    """Say which style, room, or feel the product answered, and on whose word.
+
+    These are the only reasons that are not catalogue facts, so each one is
+    marked. A guess is never stated as a fact, and a match that scored nothing
+    produces no sentence at all: silence is the honest report for a product
+    that simply does not carry the tag.
+    """
+
+    arabic = response_language(language) == "ar"
+    key = "ar" if arabic else "en"
+    wanted = {
+        "styles": soft.styles,
+        "feels": soft.feels,
+        "room_type": (soft.room_type,) if soft.room_type is not None else (),
+    }
+    reasons: list[ReasonResponse] = []
+    for component, slugs in wanted.items():
+        if not slugs:
+            continue
+        confirmed_kinds, tag_kind, vocabulary = SOFT_DIMENSIONS[component]
+        strengths = dimension_strengths(
+            product,
+            confirmed_kinds=confirmed_kinds,
+            tag_kind=tag_kind,
+            vocabulary=vocabulary,
+        )
+        for slug in slugs:
+            strength = strengths.get(slug)
+            if strength is None:
+                continue
+            label = term_label(vocabulary, slug, language)
+            stated = strength >= 1
+            phrasing = _CONFIRMED_PHRASING if stated else _INFERRED_PHRASING
+            text = phrasing[component][key].format(label=label)
+            if not stated:
+                text += _OUR_GUESS[key]
+            reasons.append(
+                ReasonResponse(
+                    code=component,
+                    text=text,
+                    basis="catalogue" if stated else "inferred",
+                )
+            )
     return tuple(reasons)
 
 

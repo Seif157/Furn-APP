@@ -76,7 +76,18 @@ Phase 5A     Natural-Language Parser               COMMITTED, LIVE-VERIFIED
 Phase 5C     Search Endpoint POST /v1/search       COMMITTED, LIVE-VERIFIED
 Phase 6D     Comparison + similar products         COMMITTED, VERIFIED LOCALLY
 Phase 10A/C  Request logging, rate limits, cache   COMMITTED, VERIFIED LOCALLY
+Phase 7A     Clarification with tappable answers   IMPLEMENTED LOCALLY 2026-09-20
+Phase 9B/6.10 Personalization + seller fallback    IMPLEMENTED LOCALLY 2026-09-20
+Intake AI    Service triage + furnishing brief     IMPLEMENTED LOCALLY 2026-09-20
+Fuzzy search Inferred style/room/feel tags         CODE LOCAL; MIGRATION NOT APPLIED
 ```
+
+The 2026-09-20 work is in docs/phase-9-fuzzy-intake-personalization.md. Note
+what is inert until a migration runs: fuzzy ranking needs
+`migrations/product-search-tags-2026-09-20.sql` applied and
+`scripts/derive_search_tags.py` run, and until then a search for "cosy"
+behaves exactly as it did before. None of the four features has been measured
+against the live model.
 
 Branches: **`main` only.** On 2026-09-18, at the user's explicit request, `main`
 was fast-forwarded to the tip of the stacked branches and the three phase
@@ -1224,7 +1235,7 @@ Phase 4B vocabulary maps it, which is what the vocabulary is for. Re-measured
 over nine sentences at five runs each, every answer was correct.
 
 AI ASSISTANT
-├── Phase 7A Clarification                   PARTIAL (one-shot question, see 6.3)
+├── Phase 7A Clarification                   IMPLEMENTED LOCALLY 2026-09-20
 ├── Phase 7B Conversational Search Refinement IMPLEMENTED, LIVE-VERIFIED 2026-09-18
 └── Phase 7C Assistant State                 NOT BUILT (the app holds the history)
 
@@ -1271,9 +1282,14 @@ photos raise a privacy obligation. Revisit after the security review.
 
 OPTIMIZATION
 ├── Phase 9A Arabic / English Normalization
-├── Phase 9B Personalization
-├── Phase 9C Seller Fallback
+├── Phase 9B Personalization                  IMPLEMENTED LOCALLY 2026-09-20
+├── Phase 9C Seller Fallback                  IMPLEMENTED LOCALLY 2026-09-20
 └── Phase 9D Ranking Optimization
+
+INTAKE (new 2026-09-20)
+├── Service triage      POST /v1/intake/service     IMPLEMENTED LOCALLY
+├── Furnishing brief    POST /v1/intake/furnishing  IMPLEMENTED LOCALLY
+└── Inferred tags       product_search_tag          MIGRATION NOT APPLIED
 
 PRODUCTION
 ├── Phase 10A Observability                   PARTIAL (request id + log line)
@@ -1322,11 +1338,13 @@ string, so a direct cast to double throws. And the displayed price must prefer
 Running the demo: docs/phase-5-demo-runbook.md. Getting started:
 docs/getting-started.md.
 
-Engineering candidates after the demo, in the recommended order: enrichment
-data (styles, room types) so fuzzy search can be benchmarked and section 11's
-vector decision revisited; Phase 7A conversational clarification; per-user and
-AI-latency fields in the request log; a shared store for limits and cache
-before a second server.
+Engineering candidates after the demo, in the recommended order: apply
+`migrations/product-search-tags-2026-09-20.sql` and run
+`scripts/derive_search_tags.py`, which is what makes fuzzy search do anything
+at all and what finally allows section 11's vector decision to be measured;
+measure the four 2026-09-20 features against the live model, none of which has
+met it; per-user and AI-latency fields in the request log; a shared store for
+limits and cache before a second server.
 
 ## 15. Live-System Safety
 

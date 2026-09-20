@@ -22,12 +22,14 @@ ScoreComponent = Literal[
     "colours",
     "materials",
     "styles",
+    "feels",
     "room_type",
     "width",
     "height",
     "depth",
     "price",
     "query",
+    "taste",
 ]
 
 

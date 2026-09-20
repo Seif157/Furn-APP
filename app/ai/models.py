@@ -52,6 +52,7 @@ class RequirementDraft(BaseModel):
     preferred_colours: SurfaceList = ()
     preferred_materials: SurfaceList = ()
     styles: SurfaceList = ()
+    feels: SurfaceList = ()
     room_type: Surface | None = None
     preferred_width_cm: Decimal | None = None
     preferred_height_cm: Decimal | None = None

@@ -14,10 +14,15 @@ from app.cart.gateway import SupabaseCartCreator, SupabaseCustomerCartReader
 from app.cart.router import router as cart_router
 from app.catalog.gateway import SupabaseCatalogueGateway
 from app.catalog.router import router as catalogue_router
+from app.catalog.tags import SupabaseSearchTagGateway
 from app.config import AISettings, load_ai_settings, load_settings
 from app.core.cache import AICaches
 from app.core.limits import Limit, RateLimiter
 from app.core.observability import RequestLogMiddleware, configure_logging
+from app.intake.gateway import SupabaseServiceDirectoryGateway
+from app.intake.router import router as intake_router
+from app.personalization.gateway import SupabasePurchaseHistoryGateway
+from app.recommendations.offerings import SupabaseOfferingGateway
 from app.recommendations.router import router as recommendations_router
 from app.reviews.gateway import SupabaseReviewGateway
 from app.reviews.router import router as reviews_router
@@ -44,6 +49,7 @@ def build_rate_limiter(ai_settings: AISettings) -> RateLimiter:
             "search": Limit(ai_settings.rate_limit_search_per_minute, 60),
             "room_plan": Limit(ai_settings.rate_limit_room_plan_per_minute, 60),
             "room_image": Limit(ai_settings.rate_limit_room_image_per_hour, 3600),
+            "intake": Limit(ai_settings.rate_limit_intake_per_minute, 60),
         }
     )
 
@@ -74,6 +80,26 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             settings=settings,
         )
         application.state.catalogue_gateway = SupabaseCatalogueGateway(
+            client=client,
+            settings=settings,
+        )
+        # Inferred style, room and feel tags. Absent or unreadable, search
+        # simply loses a ranking signal; see app/catalog/tags.py.
+        application.state.search_tag_gateway = SupabaseSearchTagGateway(
+            client=client,
+            settings=settings,
+        )
+        # The marketplace's own service directory, for intake triage.
+        application.state.service_directory_gateway = SupabaseServiceDirectoryGateway(
+            client=client, settings=settings
+        )
+        # Phase 9B: the caller's own purchases, for tie-breaking only.
+        application.state.purchase_history_gateway = SupabasePurchaseHistoryGateway(
+            client=client,
+            settings=settings,
+        )
+        # Section 6.10: made-to-order offers, shown only when nothing matched.
+        application.state.offering_gateway = SupabaseOfferingGateway(
             client=client,
             settings=settings,
         )
@@ -132,3 +158,4 @@ app.include_router(rooms_router)
 app.include_router(recommendations_router)
 app.include_router(reviews_router)
 app.include_router(cart_router)
+app.include_router(intake_router)

@@ -12,6 +12,7 @@ from collections import Counter
 from collections.abc import Iterable
 
 from app.catalog.normalization import NormalizedProduct
+from app.personalization.profile import TasteProfile
 from app.search.filters import constraint_checks, satisfies_all
 from app.search.models import SearchSpecification
 from app.search.ranking import combine, score_parts
@@ -23,6 +24,7 @@ MAX_CANDIDATES = 10_000
 def search_products(
     products: Iterable[NormalizedProduct],
     specification: SearchSpecification,
+    profile: TasteProfile | None = None,
 ) -> SearchResults:
     """Filter, score, order, and page a bounded sequence of candidates."""
 
@@ -44,7 +46,7 @@ def search_products(
                 if not check.satisfied:
                     rejections[check.name] += 1
             continue
-        parts = score_parts(product, specification.soft, specification.query)
+        parts = score_parts(product, specification.soft, specification.query, profile)
         matches.append(
             ScoredProduct(
                 product_id=product.id,
