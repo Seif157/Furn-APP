@@ -200,6 +200,14 @@ class SearchResponse(StrictResponseModel):
 
     It never changed which products matched, only which of the matching ones
     came first."""
+    awaiting_answer: bool
+    """True when the sentence asked for nothing, so nothing is being shown.
+
+    "ما هي عاصمة فرنسا؟" and "عايز أثاث" both parse into a search with no
+    constraints, which as a query means "everything". Returning the whole
+    catalogue under a question asking what they want reads as a broken screen,
+    so `items` is empty on purpose and `follow_up` is what to show. This is not
+    "no results": do not say nothing was found."""
 
 
 def _price_range(bounds: PriceRange | None) -> RangeResponse | None:
@@ -285,6 +293,7 @@ def build_search_response(
     normalized: tuple[NormalizedProduct, ...] = (),
     offers: tuple[SellerOffering, ...] = (),
     personalized: bool = False,
+    states_requirement: bool = True,
     results: SearchResults,
     specification: SearchSpecification,
     query: str,
@@ -362,13 +371,19 @@ def build_search_response(
         clarification=clarification,
         language=language,
     )
+    # A sentence that asked for nothing is answered with the question, not with
+    # the catalogue. Only when there is something to ask, though: an empty page
+    # with nothing on it is worse than a list nobody wanted.
+    awaiting = not states_requirement and (
+        asked is not None or clarification is not None
+    )
     return SearchResponse(
         query=query,
         language=response_language(language),
         interpretation=build_interpretation(specification, language),
-        items=tuple(items),
+        items=() if awaiting else tuple(items),
         limit=results.limit,
-        match_count=results.match_count,
+        match_count=0 if awaiting else results.match_count,
         candidate_count=results.candidate_count,
         truncated=truncated,
         has_more=results.has_more,
@@ -396,5 +411,6 @@ def build_search_response(
             )
             for offer in offers
         ),
-        personalized=personalized,
+        personalized=personalized and not awaiting,
+        awaiting_answer=awaiting,
     )

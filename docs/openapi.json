@@ -2646,6 +2646,10 @@
           "personalized": {
             "type": "boolean",
             "title": "Personalized"
+          },
+          "awaiting_answer": {
+            "type": "boolean",
+            "title": "Awaiting Answer"
           }
         },
         "additionalProperties": false,
@@ -2666,7 +2670,8 @@
           "excluded_by",
           "alternatives",
           "seller_offers",
-          "personalized"
+          "personalized",
+          "awaiting_answer"
         ],
         "title": "SearchResponse"
       },

@@ -62,6 +62,7 @@ from app.search.models import (
     MAX_RESULTS,
     MAX_TEXT_LENGTH,
     detect_language,
+    states_a_requirement,
 )
 from app.search.responses import SearchResponse, build_search_response
 from app.search.service import search_products
@@ -235,6 +236,7 @@ async def search(
         truncated=truncated,
         alternatives=alternatives,
         offers=offers,
+        states_requirement=states_a_requirement(parsed.specification),
         personalized=profile is not None
         and any(
             part.component == "taste" and part.value > 0

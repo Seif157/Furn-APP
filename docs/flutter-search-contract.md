@@ -850,7 +850,8 @@ in the contract still works the same way; only the three fields marked
     ]
   },
   "seller_offers": [],                                  // new
-  "personalized": false                                 // new
+  "personalized": false,                                // new
+  "awaiting_answer": false                              // new
 }
 ```
 
@@ -874,6 +875,19 @@ await search(query: option.send, history: [previousQuery]);
 ```
 
 That is the ordinary refinement call. There is nothing new to store.
+
+**`awaiting_answer`** is true when the sentence asked for nothing at all —
+"عايز أثاث", or an off-topic question like "ما هي عاصمة فرنسا؟". `items` is
+then empty **on purpose** and `match_count` is 0, because a search with no
+constraints means "everything" and showing the whole catalogue under a question
+asking what they want looks broken.
+
+Show `follow_up` (and `clarification`) instead. Do **not** show "no results
+found": nothing was searched for, so nothing was missing. `candidate_count`
+still reports what was examined, so the screen can say "45 products, tell me
+what you are looking for" if you want a count.
+
+When `awaiting_answer` is false, behave exactly as before.
 
 **`seller_offers`** appear only when `match_count == 0`. They are sellers'
 made-to-order offerings, not catalogue products: no stock, no colour, no
