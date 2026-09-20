@@ -15,7 +15,8 @@ missing compared with the running server is the network socket.
 It asks for an email and a password in your terminal. The password is read
 without echo, and neither it nor the session token is ever printed, logged, or
 written anywhere. Typing them in is the authorization; nothing runs without it.
-It spends five Gemini calls, six with --render. It writes nothing except the
+It spends nine Gemini calls, ten with --render, or six with
+--skip-intake. It writes nothing except the
 preview image file when asked for one, and, only with --cart, this account's
 one empty cart in Supabase if it has none yet.
 """
@@ -118,7 +119,14 @@ def show_search(sentence: str, response: httpx.Response) -> bool:
     return True
 
 
-async def run(*, render: bool, skip_rooms: bool, cart: bool, checkout: bool) -> int:
+async def run(
+    *,
+    render: bool,
+    skip_rooms: bool,
+    skip_intake: bool,
+    cart: bool,
+    checkout: bool,
+) -> int:
     try:
         settings = load_settings()
     except RuntimeError:
@@ -175,6 +183,9 @@ async def run(*, render: bool, skip_rooms: bool, cart: bool, checkout: bool) -> 
             if ok:
                 ok = await check_compare_and_similar(client, headers) and ok
 
+            if ok and not skip_intake:
+                ok = await check_intake(client, headers) and ok
+
             if ok and cart:
                 ok = await check_cart(client, headers) and ok
 
@@ -187,6 +198,8 @@ async def run(*, render: bool, skip_rooms: bool, cart: bool, checkout: bool) -> 
     del headers
     del session
     checked = "search, follow-ups, compare, similar, public reviews"
+    if not skip_intake:
+        checked += ", service triage, the furnishing brief"
     if cart:
         checked += ", the cart"
     if checkout:
@@ -366,6 +379,71 @@ async def check_meta_and_refinement(
     return True
 
 
+async def check_intake(client: httpx.AsyncClient, headers: dict[str, str]) -> bool:
+    """The two intake endpoints, against the marketplace's real service list.
+
+    Three model calls. The washing machine is deliberate: every service in the
+    live directory is a bare name with no description, and "Repair" on its own
+    once matched an appliance at 0.95. Asking for it here is how that stays
+    fixed.
+    """
+
+    problem = "باب الدولاب اتكسر"
+    print(f"\n{problem}")
+    response = await client.post(
+        "/v1/intake/service", json={"description": problem}, headers=headers
+    )
+    if response.status_code != 200:
+        detail = response.json().get("detail")
+        code = detail.get("code") if isinstance(detail, dict) else detail
+        print(f"  FAILED  intake HTTP {response.status_code}  {code}")
+        return False
+    payload = response.json()
+    for service in payload["services"]:
+        print(f"    - {service['name']}  {service['confidence']}")
+    if payload["clarification"]:
+        print(f"    asks: {payload['clarification']}")
+    if not payload["services"]:
+        print("  FAILED  a broken wardrobe door matched no service")
+        return False
+    print("  ok  routed to a real service from the live directory")
+
+    off_topic = "عايز حد يصلح الغسالة"
+    print(f"\n{off_topic}")
+    response = await client.post(
+        "/v1/intake/service", json={"description": off_topic}, headers=headers
+    )
+    if response.status_code != 200:
+        print(f"  FAILED  intake HTTP {response.status_code}")
+        return False
+    matched = response.json()["services"]
+    if matched:
+        names = ", ".join(s["name"] for s in matched)
+        print(f"  FAILED  a washing machine was routed to {names}")
+        return False
+    print("  ok  not furniture, so no service was offered")
+
+    job = "عايز أفرش شقة فيها ٣ أوض نوم وريسبشن بميزانية ١٥٠ ألف، ستايل مودرن"
+    print(f"\n{job}")
+    response = await client.post(
+        "/v1/intake/furnishing", json={"description": job}, headers=headers
+    )
+    if response.status_code != 200:
+        print(f"  FAILED  furnishing brief HTTP {response.status_code}")
+        return False
+    brief = response.json()
+    rooms = {r["room_type"]["slug"]: r["quantity"] for r in brief["rooms"]}
+    styles = [t["slug"] for t in brief["styles"]]
+    print(f"    rooms={rooms} budget={brief['total_budget']} styles={styles}")
+    for term in brief["unresolved"]:
+        print(f"    unresolved: {term['surface']}")
+    if rooms != {"bedroom": 3, "reception": 1} or brief["total_budget"] != "150000":
+        print("  FAILED  the flat did not become the form it should")
+        return False
+    print("  ok  the job became a form the app can prefill")
+    return True
+
+
 async def check_compare_and_similar(
     client: httpx.AsyncClient, headers: dict[str, str]
 ) -> bool:
@@ -454,6 +532,11 @@ def main() -> int:
     )
     parser.add_argument("--skip-rooms", action="store_true", help="Check search only.")
     parser.add_argument(
+        "--skip-intake",
+        action="store_true",
+        help="Skip service triage and the furnishing brief (saves three calls).",
+    )
+    parser.add_argument(
         "--cart",
         action="store_true",
         help="Also call POST /v1/cart twice. Creates this account's one empty "
@@ -472,6 +555,7 @@ def main() -> int:
             run(
                 render=arguments.render,
                 skip_rooms=arguments.skip_rooms,
+                skip_intake=arguments.skip_intake,
                 cart=arguments.cart or arguments.checkout,
                 checkout=arguments.checkout,
             )
