@@ -41,32 +41,19 @@ from app.intake.gateway import ServiceType
 from app.intake.triage import triage_request
 from tests import seed_catalogue as seed
 
-SERVICES = (
-    ServiceType(
-        id=uuid4(),
-        name="Furniture assembly",
-        description="Assemble flat-pack or delivered furniture at home",
-    ),
-    ServiceType(
-        id=uuid4(),
-        name="Repair",
-        description="Fix broken doors, drawers, hinges and frames",
-    ),
-    ServiceType(
-        id=uuid4(),
-        name="Upholstery",
-        description="Re-cover sofas and chairs in new fabric",
-    ),
-    ServiceType(
-        id=uuid4(),
-        name="Interior design consultation",
-        description="An designer visits and plans the space",
-    ),
-    ServiceType(
-        id=uuid4(),
-        name="Moving and delivery",
-        description="Move furniture between homes",
-    ),
+# The live directory as it really is, read from the project on 2026-09-20: six
+# names and not one description between them. That absence is the whole
+# difficulty, so it is reproduced here rather than improved upon.
+SERVICES = tuple(
+    ServiceType(id=uuid4(), name=name, description=None)
+    for name in (
+        "Delivery",
+        "Installation",
+        "Assembly",
+        "Disassembly",
+        "Repair",
+        "Maintenance",
+    )
 )
 
 FAILURES: list[str] = []
@@ -97,11 +84,16 @@ class TriageCase:
 
 TRIAGE_CASES = (
     TriageCase("باب الدولاب اتكسر", "Repair"),
-    TriageCase("I need someone to put my new wardrobe together", "Furniture assembly"),
-    TriageCase("الكنبة قماشها قديم عايز أغيره", "Upholstery"),
-    TriageCase("محتاج حد ينقل عفشي لشقة جديدة", "Moving and delivery"),
-    # Nothing in the directory does this. The right answer is no answer.
+    TriageCase("محتاج توصيل الكنبة للبيت", "Delivery"),
+    TriageCase("عايز أفك السرير عشان هنقل شقة", "Disassembly"),
+    TriageCase("my new wardrobe needs putting together", "Assembly"),
+    TriageCase("the sofa leg snapped off", "Repair"),
+    # Neither is furniture. Measured on 2026-09-20 against the real directory,
+    # the washing machine matched "Repair" at 0.95 on the strength of the name
+    # alone, which is why the instruction now says these services are about
+    # furniture and nothing else.
     TriageCase("عايز حد يصلح الغسالة", None),
+    TriageCase("التكييف بيهرب مياه", None),
 )
 
 BRIEF_CASES = (

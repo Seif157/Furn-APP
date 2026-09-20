@@ -217,10 +217,27 @@ room costs the preference rather than the plan, and the slugs turn back into
 words for the image prompt so it reads "a modern living room". Six parser tests
 and one end-to-end test now fail without the fix.
 
-**Triage refuses correctly.** "عايز حد يصلح الغسالة" — a washing machine, which
-this marketplace does not service — returned no services, twice, rather than
-reaching for the nearest thing. That is the behaviour that makes choosing by
-position worth the indirection.
+**Triage against the real directory, and what it cost.** The live
+`service_type` table turned out to hold six rows — Delivery, Installation,
+Assembly, Disassembly, Repair, Maintenance — with `name` and `description`
+columns and **not one description filled in**. The gateway reads all six.
+
+With only names to go on, "عايز حد يصلح الغسالة" (fix my washing machine)
+matched `Repair` at 0.95. The name alone says nothing about furniture, so a
+washing machine looked like a repair job. The instruction now states that every
+service in the list is about furniture and nothing else, and names the observed
+failure. Re-measured over nine cases against the real six names: 9 of 9,
+including an air conditioner, which also now returns nothing.
+
+The two genuinely ambiguous cases behave as designed: "عايز حد يركب الدولاب"
+returns Installation and Assembly at similar confidences **and** asks, in
+Egyptian Arabic, whether they mean fixing it to the wall or putting it
+together. That is the case the whole confidence-plus-clarification shape exists
+for.
+
+**Worth doing on the data side:** filling in those six descriptions would help
+more than any prompt wording, and it is the marketplace's own text rather than
+a guess. One sentence each, saying what the service covers.
 
 ## What is not done
 

@@ -75,6 +75,14 @@ that fit, most fitting first, at most three.
   list fits, answer with no numbers at all; that is a correct answer and the
   customer will be told the marketplace does not offer it.
 
+  Every one of these services is about furniture and nothing else. If the
+  thing the customer describes is not a piece of furniture - a washing
+  machine, a fridge, a car, plumbing, electrics, a phone, a wall - then no
+  service in the list fits, however well a service's name seems to match the
+  word they used. Answer with no numbers. Measured on 2026-09-20: "عايز حد
+  يصلح الغسالة" matched a service called "Repair" at 0.95 because the name
+  alone says nothing about furniture.
+
   Give each number a confidence between 0 and 1. Be honest: a request that
   could be two different services should say so with two middling numbers
   rather than one confident one.
