@@ -250,7 +250,12 @@ async def test_an_arabic_sentence_searches_the_same_catalogue() -> None:
 
 
 @pytest.mark.anyio
-async def test_a_vague_sentence_returns_a_question_and_the_whole_catalogue() -> None:
+async def test_a_sentence_that_asks_for_nothing_is_answered_with_a_question() -> None:
+    """Measured live on 2026-09-20: "ما هي عاصمة فرنسا؟" and "عايز أثاث" both
+    parse into a search with no constraints, which as a query means everything.
+    Returning 43 products under a question asking what they want reads as a
+    broken screen, so the question is the answer and the list is empty."""
+
     provider = StubProvider({"clarification_question": "Which room is it for?"})
 
     async with search_client(seed_response, provider) as client:
@@ -258,8 +263,13 @@ async def test_a_vague_sentence_returns_a_question_and_the_whole_catalogue() -> 
 
     payload = response.json()
     assert payload["clarification"] == "Which room is it for?"
-    # No hard constraint was stated, so nothing is excluded.
-    assert payload["match_count"] == 41
+    assert payload["awaiting_answer"] is True
+    assert payload["items"] == []
+    assert payload["match_count"] == 0
+    # And there is something to show instead: the same question, with answers
+    # built from products that really matched.
+    assert payload["follow_up"]["field"] == "category"
+    assert len(payload["follow_up"]["options"]) >= 2
 
 
 @pytest.mark.anyio

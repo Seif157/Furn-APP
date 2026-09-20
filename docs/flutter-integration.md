@@ -213,6 +213,9 @@ remembers nothing; the list lives in the app.
 10. **`seller_offers` are not products.** They appear only when nothing
     matched, they are made to order, and each carries a `label` saying so.
     Show them in their own section, never in the results list.
+11. **`awaiting_answer: true` is a question, not an empty result.** The
+    sentence asked for nothing, so `items` is empty deliberately. Show
+    `follow_up`; never show "no results found".
 
 ## Supabase rules the app must follow (final, applied 2026-09-18)
 

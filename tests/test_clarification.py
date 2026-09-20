@@ -11,7 +11,12 @@ from pydantic import TypeAdapter
 from app.catalog.normalization import NormalizedProduct, normalize_product
 from app.catalog.upstream_models import UpstreamProduct
 from app.search.clarification import MIN_BROAD_MATCHES, follow_up
-from app.search.models import Language, PriceRange, build_specification
+from app.search.models import (
+    Language,
+    PriceRange,
+    build_specification,
+    states_a_requirement,
+)
 from tests import seed_catalogue as seed
 from tests.test_catalog import TEST_ACCESS_TOKEN
 from tests.test_inferred_tags import tagged_search_client
@@ -176,6 +181,107 @@ async def test_the_endpoint_returns_a_tappable_question() -> None:
     assert len(asked["options"]) >= 2
     for option in asked["options"]:
         assert option["send"] and option["label"] and option["value"]
+
+
+# --- a sentence that asked for nothing -------------------------------------
+
+
+def test_what_counts_as_asking_for_something() -> None:
+    def asks(**kwargs: Any) -> bool:
+        return states_a_requirement(
+            build_specification(query="x", **kwargs).specification
+        )
+
+    assert asks(category="sofa") is True
+    assert asks(preferred_colours=("beige",)) is True
+    assert asks(feels=("cosy",)) is True
+    assert asks(price=PriceRange(maximum=Decimal("30000"))) is True
+    # Nothing but the raw sentence: as a search this means "everything".
+    assert asks() is False
+    # The default says nothing; choosing the other way is a statement.
+    assert asks(in_stock_only=True) is False
+    assert asks(in_stock_only=False) is True
+
+
+@pytest.mark.anyio
+async def test_an_off_topic_question_is_not_answered_with_the_catalogue() -> None:
+    """Measured live: "ما هي عاصمة فرنسا؟" parses to no constraints at all and
+    used to return 43 of 44 products under a question asking what they want."""
+
+    provider = StubProvider({"clarification_question": "بتدور على إيه؟"})
+    record: list[Any] = []
+
+    async with tagged_search_client({}, provider, record) as client:
+        response = await client.post(
+            "/v1/search",
+            json={"query": "ما هي عاصمة فرنسا؟"},
+            headers={"Authorization": f"Bearer {TEST_ACCESS_TOKEN}"},
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["awaiting_answer"] is True
+    assert body["items"] == []
+    assert body["match_count"] == 0
+    assert body["personalized"] is False
+    # Not "nothing found": a question, with answers drawn from real products.
+    assert body["clarification"] == "بتدور على إيه؟"
+    assert len(body["follow_up"]["options"]) >= 2
+    # The catalogue was still examined, and the response says so honestly.
+    assert body["candidate_count"] > 0
+
+
+@pytest.mark.anyio
+async def test_a_real_search_is_never_withheld() -> None:
+    provider = StubProvider({"category": "sofa"})
+    record: list[Any] = []
+
+    async with tagged_search_client({}, provider, record) as client:
+        response = await client.post(
+            "/v1/search",
+            json={"query": "a sofa"},
+            headers={"Authorization": f"Bearer {TEST_ACCESS_TOKEN}"},
+        )
+
+    body = response.json()
+    assert body["awaiting_answer"] is False
+    assert body["items"]
+    assert body["match_count"] > 0
+
+
+def test_nothing_is_withheld_when_there_is_no_question_to_ask() -> None:
+    """An empty screen with nothing on it is worse than a list nobody asked for.
+
+    With too few matches to offer categories and no question from the parser,
+    the products are shown rather than withheld.
+    """
+
+    from app.search.responses import build_search_response
+    from app.search.service import search_products
+
+    products = catalogue()[:3]
+    specification = build_specification(query="anything at all").specification
+    results = search_products(products, specification)
+    upstream = TypeAdapter(tuple[UpstreamProduct, ...]).validate_json(
+        seed.as_json_fixture()
+    )
+
+    response = build_search_response(
+        upstream[:3],
+        normalized=products,
+        results=results,
+        specification=specification,
+        query="anything at all",
+        language="en",
+        clarification=None,
+        unresolved=(),
+        truncated=False,
+        states_requirement=False,
+    )
+
+    assert response.follow_up is None
+    assert response.awaiting_answer is False
+    assert response.items
 
 
 @pytest.mark.anyio

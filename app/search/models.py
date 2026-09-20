@@ -279,6 +279,29 @@ class SearchSpecification(StrictModel):
         return self
 
 
+def states_a_requirement(specification: SearchSpecification) -> bool:
+    """True when the sentence asked for something, not merely said something.
+
+    "عايز كنبة" states a requirement. "ما هي عاصمة فرنسا؟" does not: it parses
+    into a specification whose only content is the raw text, which as a search
+    means "everything". The caller uses this to answer with a question instead
+    of with the whole catalogue.
+
+    ``in_stock_only`` counts only when it is false. True is the default on
+    every parse and says nothing; false is the customer saying they will wait
+    or that availability does not matter, which is a statement, and "show me
+    everything, in stock or not" deserves everything rather than a question.
+    """
+
+    hard = specification.hard.model_dump(exclude={"in_stock_only"}, exclude_none=True)
+    soft = specification.soft.model_dump(exclude_none=True)
+    return (
+        any(hard.values())
+        or any(soft.values())
+        or specification.hard.in_stock_only is False
+    )
+
+
 class UnresolvedTerm(StrictModel):
     """A surface form the vocabularies could not map; input for clarification."""
 

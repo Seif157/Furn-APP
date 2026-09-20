@@ -260,6 +260,32 @@ fallback found nothing because `custom_offering` holds no rows at all. Phase
 7A's question was not exercised: no sentence in the smoke test is vague enough
 to produce one.
 
+## A sentence that asks for nothing
+
+Five off-topic sentences were put through the real parser on 2026-09-20: a
+capital city, a request for Python code, a prompt injection asking for a 90%
+discount, a flight booking, and a political opinion. The parser behaved: no
+constraints, nothing invented, the injection ignored, and a clarification in
+the customer's language that stays on furniture ("إحنا موقع للأثاث، تحب تدور
+على أي نوع من العفش؟").
+
+The search underneath did not. A specification with no constraints means
+"everything", so every one of those sentences returned 43 of 44 products
+beneath a question asking what the customer wanted.
+
+`states_a_requirement` (app/search/models.py) now decides whether a sentence
+asked for anything, and the response carries `awaiting_answer`. When a sentence
+asked for nothing and there is a question to ask, `items` is empty and the
+question is the answer. Two deliberate limits:
+
+- `in_stock_only` counts only when it is **false**. True is the default on
+  every parse and says nothing; false is the customer saying they will wait, so
+  "show me everything, in stock or not" still returns everything.
+- Nothing is withheld unless there is something to show instead. With no
+  question from the parser and too few matches to offer categories, the
+  products are returned as before: an empty screen with nothing on it is worse
+  than a list nobody asked for.
+
 ## What is not done
 
 - **`modern` is on 36 of 45 products.** A tag that covers 80% of the catalogue
