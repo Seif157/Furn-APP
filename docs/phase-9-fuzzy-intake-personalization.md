@@ -239,6 +239,27 @@ for.
 more than any prompt wording, and it is the marketplace's own text rather than
 a guess. One sentence each, saying what the service covers.
 
+## The signed-in run, 2026-09-20 17:15
+
+`scripts/live_search_smoke.py` with a real customer session, against the live
+project and the live model, passed everything it checks:
+
+```text
+search, refinement, alternatives, compare, similar, public reviews   ok
+the fuzzy sentence, ranking on inferred tags, both reasons labelled    ok
+service triage: a broken wardrobe door -> Repair 0.85                  ok
+service triage: a washing machine -> no service                        ok
+the furnishing brief: {bedroom: 3, reception: 1}, 150000, modern       ok
+room planning: 4 pieces, 24,330 of a 40,000 budget                     ok
+```
+
+Two features were live and did nothing, for want of data rather than through a
+fault, and it is worth writing down which is which. Personalization needs two
+purchases and that account has one, so `personalized` was false. The seller
+fallback found nothing because `custom_offering` holds no rows at all. Phase
+7A's question was not exercised: no sentence in the smoke test is vague enough
+to produce one.
+
 ## What is not done
 
 - **`modern` is on 36 of 45 products.** A tag that covers 80% of the catalogue

@@ -76,9 +76,9 @@ Phase 5A     Natural-Language Parser               COMMITTED, LIVE-VERIFIED
 Phase 5C     Search Endpoint POST /v1/search       COMMITTED, LIVE-VERIFIED
 Phase 6D     Comparison + similar products         COMMITTED, VERIFIED LOCALLY
 Phase 10A/C  Request logging, rate limits, cache   COMMITTED, VERIFIED LOCALLY
-Phase 7A     Clarification with tappable answers   IMPLEMENTED LOCALLY 2026-09-20
-Phase 9B/6.10 Personalization + seller fallback    IMPLEMENTED LOCALLY 2026-09-20
-Intake AI    Service triage + furnishing brief     IMPLEMENTED LOCALLY 2026-09-20
+Phase 7A     Clarification with tappable answers   COMMITTED; not yet exercised live
+Phase 9B/6.10 Personalization + seller fallback    COMMITTED; inert for want of data
+Intake AI    Service triage + furnishing brief     COMMITTED, LIVE-VERIFIED 2026-09-20
 Fuzzy search Inferred style/room/feel tags         APPLIED LIVE 2026-09-20, VERIFIED (9/9)
 ```
 
@@ -93,6 +93,20 @@ below a seller-confirmed attribute, and every reason built from one is
 labelled a guess. `modern` sits on 36 of the 45 products, so a "modern" search
 barely reorders; the discriminating tags are the rarer ones (scandinavian,
 industrial, luxury, space_saving, hotel_like, cosy).
+
+The signed-in smoke test passed end to end on 2026-09-20 at 17:15 with a real
+customer session: search, the fuzzy sentence ranking on inferred tags with both
+reasons labelled a guess, a follow-up, alternatives, compare, similar, public
+reviews, service triage (a broken wardrobe door to Repair 0.85, a washing
+machine to nothing), the furnishing brief (3 bedrooms and a reception at
+150,000, style modern) and a room plan.
+
+Two features are live in code but did nothing in that run, for want of data
+rather than through a fault. Personalization needs two purchases and customer1
+has one, so `personalized` was false. The seller fallback found no offers
+because `custom_offering` is empty (0 rows). Phase 7A's tappable question was
+not exercised at all: the smoke test has no sentence vague enough to trigger
+one.
 
 The three new prompts were measured live on 2026-09-20 with
 `scripts/live_intake_smoke.py` (tagging, triage, brief; Gemini only, no
