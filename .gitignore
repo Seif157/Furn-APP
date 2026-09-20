@@ -1,0 +1,27 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+
+# Local environment files (keep the safe template)
+.env
+.env.*
+!.env.example
+
+# Coverage output
+.coverage
+htmlcov/
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Room preview written by scripts/live_search_smoke.py --render
+room-preview.png
+room-preview.jpg

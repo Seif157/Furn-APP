@@ -1,0 +1,3163 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Furniture AI API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Get Health",
+        "description": "Report that the API process is healthy.",
+        "operationId": "get_health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/meta": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Get Meta",
+        "description": "Switched-on features and limits. Contains no secret and no customer data.",
+        "operationId": "get_meta_v1_meta_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/search/vocabulary": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Get Vocabulary",
+        "description": "The categories, colours and materials search resolves words to.",
+        "operationId": "get_vocabulary_v1_search_vocabulary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/search/examples": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Get Examples",
+        "description": "Sentences known to work, for empty search and room-planner screens.",
+        "operationId": "get_examples_v1_search_examples_get",
+        "parameters": [
+          {
+            "name": "language",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ar",
+                "en"
+              ],
+              "type": "string",
+              "default": "en",
+              "title": "Language"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExamplesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Get Me",
+        "description": "Return the identity established by the verified access token.",
+        "operationId": "get_me_v1_me_get",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/catalog/products": {
+      "get": {
+        "tags": [
+          "catalogue"
+        ],
+        "summary": "List Products",
+        "description": "Return one deterministic page of recommendation-eligible products.",
+        "operationId": "list_products_v1_catalog_products_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/catalog/products/{product_id}": {
+      "get": {
+        "tags": [
+          "catalogue"
+        ],
+        "summary": "Get Product",
+        "description": "Return one eligible product without revealing why other records are hidden.",
+        "operationId": "get_product_v1_catalog_products__product_id__get",
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Product Id"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/search": {
+      "post": {
+        "tags": [
+          "search"
+        ],
+        "summary": "Search",
+        "description": "Parse one sentence, then rank the products the caller is allowed to see.",
+        "operationId": "search_v1_search_post",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/rooms/plan": {
+      "post": {
+        "tags": [
+          "rooms"
+        ],
+        "summary": "Plan",
+        "description": "Plan a room of real products from one sentence.",
+        "operationId": "plan_v1_rooms_plan_post",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoomPlanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoomPlanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/rooms/image": {
+      "post": {
+        "tags": [
+          "rooms"
+        ],
+        "summary": "Image",
+        "description": "Render a labelled preview of real products the caller may see.",
+        "operationId": "image_v1_rooms_image_post",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoomImageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoomImageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/compare": {
+      "post": {
+        "tags": [
+          "recommendations"
+        ],
+        "summary": "Compare",
+        "description": "Compare real products the caller may see, in the order they were sent.",
+        "operationId": "compare_v1_compare_post",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompareRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComparisonResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/catalog/products/{product_id}/similar": {
+      "get": {
+        "tags": [
+          "recommendations"
+        ],
+        "summary": "Similar",
+        "description": "Suggest real products of the same kind that share facts with this one.",
+        "operationId": "similar_v1_catalog_products__product_id__similar_get",
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Product Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 12,
+              "minimum": 1,
+              "default": 6,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ar",
+                "en"
+              ],
+              "type": "string",
+              "default": "en",
+              "title": "Language"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimilarResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/reviews/public": {
+      "get": {
+        "tags": [
+          "reviews"
+        ],
+        "summary": "List Public Reviews",
+        "description": "Newest first. Exactly one of `product_id` or `seller_id` is required.",
+        "operationId": "list_public_reviews_v1_reviews_public_get",
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Product Id"
+            }
+          },
+          {
+            "name": "seller_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Seller Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10000,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicReviewListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/cart": {
+      "post": {
+        "tags": [
+          "cart"
+        ],
+        "summary": "Ensure Cart",
+        "description": "Return the caller's cart, creating it the first time.",
+        "operationId": "ensure_cart_v1_cart_post",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/intake/service": {
+      "post": {
+        "tags": [
+          "intake"
+        ],
+        "summary": "Classify Service Request",
+        "description": "Match a described problem to the services the marketplace really offers.",
+        "operationId": "classify_service_request_v1_intake_service_post",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceTriageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/intake/furnishing": {
+      "post": {
+        "tags": [
+          "intake"
+        ],
+        "summary": "Read Furnishing Brief",
+        "description": "Read a furnishing job into the fields the request form already has.",
+        "operationId": "read_furnishing_brief_v1_intake_furnishing_post",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntakeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AlternativeResponse": {
+        "properties": {
+          "product": {
+            "$ref": "#/components/schemas/ProductResponse"
+          },
+          "missed": {
+            "items": {
+              "$ref": "#/components/schemas/ReasonResponse"
+            },
+            "type": "array",
+            "title": "Missed"
+          },
+          "missed_count": {
+            "type": "integer",
+            "title": "Missed Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "product",
+          "missed",
+          "missed_count"
+        ],
+        "title": "AlternativeResponse",
+        "description": "A real product that missed, and exactly what it missed by.\n\nOffered only when nothing matched. Section 6.10 allows nearest real\nalternatives and forbids fabricating a product; these are catalogue rows\nthat failed the fewest constraints, with the shortfall stated plainly so a\ncustomer can decide whether to relax."
+      },
+      "BriefResponse": {
+        "properties": {
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "rooms": {
+            "items": {
+              "$ref": "#/components/schemas/BriefRoomResponse"
+            },
+            "type": "array",
+            "title": "Rooms"
+          },
+          "total_budget": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Budget"
+          },
+          "styles": {
+            "items": {
+              "$ref": "#/components/schemas/app__search__responses__TermResponse"
+            },
+            "type": "array",
+            "title": "Styles"
+          },
+          "feels": {
+            "items": {
+              "$ref": "#/components/schemas/app__search__responses__TermResponse"
+            },
+            "type": "array",
+            "title": "Feels"
+          },
+          "unresolved": {
+            "items": {
+              "$ref": "#/components/schemas/UnresolvedResponse"
+            },
+            "type": "array",
+            "title": "Unresolved"
+          },
+          "clarification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarification"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "language",
+          "rooms",
+          "total_budget",
+          "styles",
+          "feels",
+          "unresolved",
+          "clarification"
+        ],
+        "title": "BriefResponse",
+        "description": "A furnishing job read into the request form's own fields."
+      },
+      "BriefRoomResponse": {
+        "properties": {
+          "room_type": {
+            "$ref": "#/components/schemas/app__search__responses__TermResponse"
+          },
+          "quantity": {
+            "type": "integer",
+            "title": "Quantity"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "room_type",
+          "quantity"
+        ],
+        "title": "BriefRoomResponse"
+      },
+      "CartResponse": {
+        "properties": {
+          "cart_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Cart Id"
+          },
+          "created": {
+            "type": "boolean",
+            "title": "Created"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cart_id",
+          "created"
+        ],
+        "title": "CartResponse"
+      },
+      "CategoryResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "CategoryResponse"
+      },
+      "CompareRequest": {
+        "properties": {
+          "product_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 2,
+            "title": "Product Ids"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "ar",
+              "en"
+            ],
+            "title": "Language",
+            "default": "en"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "product_ids"
+        ],
+        "title": "CompareRequest"
+      },
+      "ComparisonResponse": {
+        "properties": {
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "products": {
+            "items": {
+              "$ref": "#/components/schemas/ProductResponse"
+            },
+            "type": "array",
+            "title": "Products"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "summary": {
+            "items": {
+              "$ref": "#/components/schemas/ReasonResponse"
+            },
+            "type": "array",
+            "title": "Summary"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "language",
+          "products",
+          "rows",
+          "summary"
+        ],
+        "title": "ComparisonResponse"
+      },
+      "ComparisonRow": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonValue"
+            },
+            "type": "array",
+            "title": "Values"
+          },
+          "highlight": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Highlight"
+          },
+          "highlight_rule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Highlight Rule"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "label",
+          "values",
+          "highlight",
+          "highlight_rule"
+        ],
+        "title": "ComparisonRow"
+      },
+      "ComparisonValue": {
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Product Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "product_id",
+          "text",
+          "value"
+        ],
+        "title": "ComparisonValue"
+      },
+      "EnrichmentAttributeResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "value": {
+            "$ref": "#/components/schemas/JsonValue"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "value"
+        ],
+        "title": "EnrichmentAttributeResponse"
+      },
+      "ExamplesResponse": {
+        "properties": {
+          "search": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Search"
+          },
+          "search_refinements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Search Refinements"
+          },
+          "rooms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Rooms"
+          },
+          "room_refinements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Room Refinements"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "search",
+          "search_refinements",
+          "rooms",
+          "room_refinements"
+        ],
+        "title": "ExamplesResponse"
+      },
+      "ExclusionResponse": {
+        "properties": {
+          "constraint": {
+            "type": "string",
+            "title": "Constraint"
+          },
+          "excluded": {
+            "type": "integer",
+            "title": "Excluded"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "constraint",
+          "excluded"
+        ],
+        "title": "ExclusionResponse",
+        "description": "How many candidates this one hard constraint would have removed.\n\nDeterministic, and the honest answer to \"why did I get nothing?\". Phase 4D\nalready counts this while filtering, so surfacing it costs nothing and\nturns an empty result from a dead end into a reason.\n\nThe counts overlap and do not sum to the number excluded. A product that\nis both the wrong category and over budget is counted under each, which is\nwhat makes the largest count the binding constraint to relax first."
+      },
+      "FeaturesResponse": {
+        "properties": {
+          "search": {
+            "type": "boolean",
+            "title": "Search"
+          },
+          "room_planning": {
+            "type": "boolean",
+            "title": "Room Planning"
+          },
+          "room_preview": {
+            "type": "boolean",
+            "title": "Room Preview"
+          },
+          "compare": {
+            "type": "boolean",
+            "title": "Compare"
+          },
+          "similar_products": {
+            "type": "boolean",
+            "title": "Similar Products"
+          },
+          "public_reviews": {
+            "type": "boolean",
+            "title": "Public Reviews"
+          },
+          "service_triage": {
+            "type": "boolean",
+            "title": "Service Triage"
+          },
+          "furnishing_brief": {
+            "type": "boolean",
+            "title": "Furnishing Brief"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "search",
+          "room_planning",
+          "room_preview",
+          "compare",
+          "similar_products",
+          "public_reviews",
+          "service_triage",
+          "furnishing_brief"
+        ],
+        "title": "FeaturesResponse"
+      },
+      "FollowUpOptionResponse": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "send": {
+            "type": "string",
+            "title": "Send"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "value",
+          "label",
+          "send"
+        ],
+        "title": "FollowUpOptionResponse",
+        "description": "One tappable answer to the follow-up question."
+      },
+      "FollowUpResponse": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/FollowUpOptionResponse"
+            },
+            "type": "array",
+            "title": "Options"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "field",
+          "question",
+          "options"
+        ],
+        "title": "FollowUpResponse",
+        "description": "A question with answers the customer can tap. Phase 7A.\n\nPresent only when asking is worth it: the sentence was too vague to search,\nor it named no kind of furniture and matched broadly. Every option is built\nfrom products that actually matched, so tapping one cannot lead nowhere."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "title": "Status"
+          },
+          "service": {
+            "type": "string",
+            "const": "furniture-ai-api",
+            "title": "Service"
+          },
+          "version": {
+            "type": "string",
+            "const": "0.1.0",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "service",
+          "version"
+        ],
+        "title": "HealthResponse",
+        "description": "Strict response schema for the service health check."
+      },
+      "IntakeRequest": {
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "history": {
+            "items": {
+              "type": "string",
+              "maxLength": 500,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "History",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "description"
+        ],
+        "title": "IntakeRequest",
+        "description": "One description, bounded before a provider call is spent."
+      },
+      "InterpretationResponse": {
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/app__search__responses__TermResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "colours": {
+            "items": {
+              "$ref": "#/components/schemas/app__search__responses__TermResponse"
+            },
+            "type": "array",
+            "title": "Colours"
+          },
+          "materials": {
+            "items": {
+              "$ref": "#/components/schemas/app__search__responses__TermResponse"
+            },
+            "type": "array",
+            "title": "Materials"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RangeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "width_cm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RangeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "height_cm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RangeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "depth_cm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RangeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "in_stock_only": {
+            "type": "boolean",
+            "title": "In Stock Only"
+          },
+          "preferred_colours": {
+            "items": {
+              "$ref": "#/components/schemas/app__search__responses__TermResponse"
+            },
+            "type": "array",
+            "title": "Preferred Colours"
+          },
+          "preferred_materials": {
+            "items": {
+              "$ref": "#/components/schemas/app__search__responses__TermResponse"
+            },
+            "type": "array",
+            "title": "Preferred Materials"
+          },
+          "styles": {
+            "items": {
+              "$ref": "#/components/schemas/app__search__responses__TermResponse"
+            },
+            "type": "array",
+            "title": "Styles"
+          },
+          "feels": {
+            "items": {
+              "$ref": "#/components/schemas/app__search__responses__TermResponse"
+            },
+            "type": "array",
+            "title": "Feels"
+          },
+          "room_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/app__search__responses__TermResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "category",
+          "colours",
+          "materials",
+          "price",
+          "width_cm",
+          "height_cm",
+          "depth_cm",
+          "in_stock_only",
+          "preferred_colours",
+          "preferred_materials",
+          "styles",
+          "feels",
+          "room_type"
+        ],
+        "title": "InterpretationResponse",
+        "description": "What the backend understood the sentence to mean.\n\nReturned so a client can show the customer what was understood, and\ncorrect it. Every value here survived vocabulary resolution and bounds\nchecking, so it is what the search actually ran."
+      },
+      "JsonValue": {},
+      "LimitsResponse": {
+        "properties": {
+          "search_per_minute": {
+            "type": "integer",
+            "title": "Search Per Minute"
+          },
+          "room_plan_per_minute": {
+            "type": "integer",
+            "title": "Room Plan Per Minute"
+          },
+          "room_preview_per_hour": {
+            "type": "integer",
+            "title": "Room Preview Per Hour"
+          },
+          "max_query_length": {
+            "type": "integer",
+            "title": "Max Query Length"
+          },
+          "max_history": {
+            "type": "integer",
+            "title": "Max History"
+          },
+          "max_search_results": {
+            "type": "integer",
+            "title": "Max Search Results"
+          },
+          "max_room_pieces": {
+            "type": "integer",
+            "title": "Max Room Pieces"
+          },
+          "max_piece_quantity": {
+            "type": "integer",
+            "title": "Max Piece Quantity"
+          },
+          "max_compared_products": {
+            "type": "integer",
+            "title": "Max Compared Products"
+          },
+          "max_similar_products": {
+            "type": "integer",
+            "title": "Max Similar Products"
+          },
+          "intake_per_minute": {
+            "type": "integer",
+            "title": "Intake Per Minute"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "search_per_minute",
+          "room_plan_per_minute",
+          "room_preview_per_hour",
+          "max_query_length",
+          "max_history",
+          "max_search_results",
+          "max_room_pieces",
+          "max_piece_quantity",
+          "max_compared_products",
+          "max_similar_products",
+          "intake_per_minute"
+        ],
+        "title": "LimitsResponse"
+      },
+      "MeResponse": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id"
+          },
+          "authenticated": {
+            "type": "boolean",
+            "const": true,
+            "title": "Authenticated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "authenticated"
+        ],
+        "title": "MeResponse",
+        "description": "Public response for the current authenticated user."
+      },
+      "MetaResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "title": "Api Version"
+          },
+          "languages": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "ar",
+                "en"
+              ]
+            },
+            "type": "array",
+            "title": "Languages"
+          },
+          "features": {
+            "$ref": "#/components/schemas/FeaturesResponse"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/LimitsResponse"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "api_version",
+          "languages",
+          "features",
+          "limits"
+        ],
+        "title": "MetaResponse"
+      },
+      "ProductColorResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "stock_quantity": {
+            "type": "integer",
+            "title": "Stock Quantity"
+          },
+          "display_order": {
+            "type": "integer",
+            "title": "Display Order"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "value",
+          "stock_quantity",
+          "display_order"
+        ],
+        "title": "ProductColorResponse"
+      },
+      "ProductImageResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2083,
+            "minLength": 1,
+            "format": "uri",
+            "title": "Url"
+          },
+          "is_primary": {
+            "type": "boolean",
+            "title": "Is Primary"
+          },
+          "display_order": {
+            "type": "integer",
+            "title": "Display Order"
+          },
+          "color_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "is_primary",
+          "display_order",
+          "color_id"
+        ],
+        "title": "ProductImageResponse"
+      },
+      "ProductListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProductResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "title": "ProductListResponse"
+      },
+      "ProductResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "price": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Price"
+          },
+          "discount_price": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount Price"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "depth": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depth"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          },
+          "materials": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Materials"
+          },
+          "category": {
+            "$ref": "#/components/schemas/CategoryResponse"
+          },
+          "seller": {
+            "$ref": "#/components/schemas/SellerResponse"
+          },
+          "colors": {
+            "items": {
+              "$ref": "#/components/schemas/ProductColorResponse"
+            },
+            "type": "array",
+            "title": "Colors"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/ProductImageResponse"
+            },
+            "type": "array",
+            "title": "Images"
+          },
+          "enrichment_attributes": {
+            "items": {
+              "$ref": "#/components/schemas/EnrichmentAttributeResponse"
+            },
+            "type": "array",
+            "title": "Enrichment Attributes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "price",
+          "discount_price",
+          "width",
+          "height",
+          "depth",
+          "weight",
+          "materials",
+          "category",
+          "seller",
+          "colors",
+          "images",
+          "enrichment_attributes"
+        ],
+        "title": "ProductResponse"
+      },
+      "PublicReviewListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PublicReviewResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "has_more"
+        ],
+        "title": "PublicReviewListResponse"
+      },
+      "PublicReviewResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "target_kind": {
+            "type": "string",
+            "title": "Target Kind"
+          },
+          "product_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Id"
+          },
+          "seller_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seller Id"
+          },
+          "rating": {
+            "type": "integer",
+            "title": "Rating"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "target_kind",
+          "product_id",
+          "seller_id",
+          "rating",
+          "comment",
+          "created_at"
+        ],
+        "title": "PublicReviewResponse"
+      },
+      "RangeResponse": {
+        "properties": {
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "minimum",
+          "maximum"
+        ],
+        "title": "RangeResponse",
+        "description": "An inclusive bound the customer stated. Units follow the field name."
+      },
+      "ReasonResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "catalogue",
+              "inferred"
+            ],
+            "title": "Basis",
+            "default": "catalogue"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "text"
+        ],
+        "title": "ReasonResponse",
+        "description": "One grounded statement about a product, in the customer's language.\n\n``code`` is stable and machine-readable; ``text`` is display copy built\nfrom catalogue values. Section 6.6 of the master plan requires catalogue\nfact, inference, and aesthetic judgement to stay separate, so every reason\nhere is the first kind: a number or a term the catalogue actually holds."
+      },
+      "RoomImageItem": {
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Product Id"
+          },
+          "quantity": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Quantity",
+            "default": 1
+          },
+          "colour_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Colour Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "product_id"
+        ],
+        "title": "RoomImageItem"
+      },
+      "RoomImageRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RoomImageItem"
+            },
+            "type": "array",
+            "maxItems": 6,
+            "minItems": 1,
+            "title": "Items"
+          },
+          "room_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Room Type"
+          },
+          "styles": {
+            "items": {
+              "type": "string",
+              "maxLength": 30
+            },
+            "type": "array",
+            "maxItems": 5,
+            "title": "Styles",
+            "default": []
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "ar",
+              "en"
+            ],
+            "title": "Language",
+            "default": "en"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "RoomImageRequest",
+        "description": "Which real products to render. Ids only: the server looks each one up\nagain under the caller's own token, so a client cannot render a product\nit could not have been shown, or describe a product that does not exist."
+      },
+      "RoomImageResponse": {
+        "properties": {
+          "image_base64": {
+            "type": "string",
+            "title": "Image Base64"
+          },
+          "mime_type": {
+            "type": "string",
+            "title": "Mime Type"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "disclaimer": {
+            "type": "string",
+            "title": "Disclaimer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RoomImageItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "references_used": {
+            "type": "integer",
+            "title": "References Used"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "image_base64",
+          "mime_type",
+          "label",
+          "disclaimer",
+          "items",
+          "references_used"
+        ],
+        "title": "RoomImageResponse"
+      },
+      "RoomItemResponse": {
+        "properties": {
+          "requested": {
+            "$ref": "#/components/schemas/app__search__responses__TermResponse"
+          },
+          "product": {
+            "$ref": "#/components/schemas/ProductResponse"
+          },
+          "quantity": {
+            "type": "integer",
+            "title": "Quantity"
+          },
+          "unit_price": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Unit Price"
+          },
+          "line_total": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Line Total"
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget"
+          },
+          "over_budget_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Over Budget By"
+          },
+          "colour": {
+            "type": "string",
+            "title": "Colour"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/ReasonResponse"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "upgrades": {
+            "items": {
+              "$ref": "#/components/schemas/UpgradeResponse"
+            },
+            "type": "array",
+            "title": "Upgrades"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "requested",
+          "product",
+          "quantity",
+          "unit_price",
+          "line_total",
+          "budget",
+          "over_budget_by",
+          "colour",
+          "reasons",
+          "upgrades"
+        ],
+        "title": "RoomItemResponse"
+      },
+      "RoomPlanRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Query"
+          },
+          "history": {
+            "items": {
+              "type": "string",
+              "maxLength": 500,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "History",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "RoomPlanRequest"
+      },
+      "RoomPlanResponse": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RoomItemResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Total"
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget"
+          },
+          "within_budget": {
+            "type": "boolean",
+            "title": "Within Budget"
+          },
+          "every_line_within_budget": {
+            "type": "boolean",
+            "title": "Every Line Within Budget"
+          },
+          "remaining": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining"
+          },
+          "over_budget_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Over Budget By"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "budget_question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Question"
+          },
+          "unfilled": {
+            "items": {
+              "$ref": "#/components/schemas/UnfilledResponse"
+            },
+            "type": "array",
+            "title": "Unfilled"
+          },
+          "unresolved": {
+            "items": {
+              "$ref": "#/components/schemas/UnresolvedResponse"
+            },
+            "type": "array",
+            "title": "Unresolved"
+          },
+          "clarification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarification"
+          },
+          "image_request": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoomImageRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "query",
+          "language",
+          "items",
+          "total",
+          "budget",
+          "within_budget",
+          "every_line_within_budget",
+          "remaining",
+          "over_budget_by",
+          "summary",
+          "budget_question",
+          "unfilled",
+          "unresolved",
+          "clarification",
+          "image_request"
+        ],
+        "title": "RoomPlanResponse"
+      },
+      "SearchItemResponse": {
+        "properties": {
+          "product": {
+            "$ref": "#/components/schemas/ProductResponse"
+          },
+          "score": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Score"
+          },
+          "matched": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matched"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/ReasonResponse"
+            },
+            "type": "array",
+            "title": "Reasons"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "product",
+          "score",
+          "matched",
+          "reasons"
+        ],
+        "title": "SearchItemResponse",
+        "description": "One matching product and the grounded reason it matched."
+      },
+      "SearchRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Query"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 20
+          },
+          "history": {
+            "items": {
+              "type": "string",
+              "maxLength": 500,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "History",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "SearchRequest",
+        "description": "The only user-controlled input, bounded before a provider call is spent."
+      },
+      "SearchResponse": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "interpretation": {
+            "$ref": "#/components/schemas/InterpretationResponse"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SearchItemResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "match_count": {
+            "type": "integer",
+            "title": "Match Count"
+          },
+          "candidate_count": {
+            "type": "integer",
+            "title": "Candidate Count"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          },
+          "clarification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarification"
+          },
+          "follow_up": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FollowUpResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unresolved": {
+            "items": {
+              "$ref": "#/components/schemas/UnresolvedResponse"
+            },
+            "type": "array",
+            "title": "Unresolved"
+          },
+          "excluded_by": {
+            "items": {
+              "$ref": "#/components/schemas/ExclusionResponse"
+            },
+            "type": "array",
+            "title": "Excluded By"
+          },
+          "alternatives": {
+            "items": {
+              "$ref": "#/components/schemas/AlternativeResponse"
+            },
+            "type": "array",
+            "title": "Alternatives"
+          },
+          "seller_offers": {
+            "items": {
+              "$ref": "#/components/schemas/SellerOfferResponse"
+            },
+            "type": "array",
+            "title": "Seller Offers"
+          },
+          "personalized": {
+            "type": "boolean",
+            "title": "Personalized"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "query",
+          "language",
+          "interpretation",
+          "items",
+          "limit",
+          "match_count",
+          "candidate_count",
+          "truncated",
+          "has_more",
+          "clarification",
+          "follow_up",
+          "unresolved",
+          "excluded_by",
+          "alternatives",
+          "seller_offers",
+          "personalized"
+        ],
+        "title": "SearchResponse"
+      },
+      "SellerOfferResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "seller_id": {
+            "type": "string",
+            "title": "Seller Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "description",
+          "price",
+          "seller_id",
+          "label"
+        ],
+        "title": "SellerOfferResponse",
+        "description": "A seller's made-to-order offering, shown only when nothing matched.\n\nNot a catalogue product: there is no stock, colour or delivery promise\nhere, which is why it travels in its own list with its own label instead of\namong the results. Section 6.10."
+      },
+      "SellerResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "business_name": {
+            "type": "string",
+            "title": "Business Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "business_name"
+        ],
+        "title": "SellerResponse"
+      },
+      "ServiceMatchResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "confidence": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Confidence"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "confidence"
+        ],
+        "title": "ServiceMatchResponse",
+        "description": "A real service from the marketplace's own directory.\n\n``id`` and ``name`` are the row's own values, read with the customer's\ntoken. ``confidence`` is the model's, and is the only judgement here."
+      },
+      "ServiceTriageResponse": {
+        "properties": {
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceMatchResponse"
+            },
+            "type": "array",
+            "title": "Services"
+          },
+          "clarification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarification"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "language",
+          "services",
+          "clarification"
+        ],
+        "title": "ServiceTriageResponse",
+        "description": "Which services fit a described problem. Nothing is created."
+      },
+      "SimilarItemResponse": {
+        "properties": {
+          "product": {
+            "$ref": "#/components/schemas/ProductResponse"
+          },
+          "price_difference": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Price Difference"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/ReasonResponse"
+            },
+            "type": "array",
+            "title": "Reasons"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "product",
+          "price_difference",
+          "reasons"
+        ],
+        "title": "SimilarItemResponse"
+      },
+      "SimilarResponse": {
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Product Id"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SimilarItemResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "candidate_count": {
+            "type": "integer",
+            "title": "Candidate Count"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "product_id",
+          "language",
+          "items",
+          "candidate_count",
+          "truncated"
+        ],
+        "title": "SimilarResponse"
+      },
+      "UnfilledResponse": {
+        "properties": {
+          "requested": {
+            "$ref": "#/components/schemas/app__search__responses__TermResponse"
+          },
+          "quantity": {
+            "type": "integer",
+            "title": "Quantity"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "requested",
+          "quantity",
+          "reason",
+          "text"
+        ],
+        "title": "UnfilledResponse"
+      },
+      "UnresolvedResponse": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "surface": {
+            "type": "string",
+            "title": "Surface"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "field",
+          "surface"
+        ],
+        "title": "UnresolvedResponse",
+        "description": "A word the vocabularies did not recognise, reported rather than guessed."
+      },
+      "UpgradeResponse": {
+        "properties": {
+          "product": {
+            "$ref": "#/components/schemas/ProductResponse"
+          },
+          "unit_price": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Unit Price"
+          },
+          "line_total": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Line Total"
+          },
+          "extra_cost": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Extra Cost"
+          },
+          "colour": {
+            "type": "string",
+            "title": "Colour"
+          },
+          "room_total": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Room Total"
+          },
+          "within_room_budget": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Within Room Budget"
+          },
+          "over_item_budget_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Over Item Budget By"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/ReasonResponse"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "image_item": {
+            "$ref": "#/components/schemas/RoomImageItem"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "product",
+          "unit_price",
+          "line_total",
+          "extra_cost",
+          "colour",
+          "room_total",
+          "within_room_budget",
+          "over_item_budget_by",
+          "reasons",
+          "summary",
+          "image_item"
+        ],
+        "title": "UpgradeResponse",
+        "description": "A better-matching option for one line, for a little more money.\n\nOffered only when it scores higher on what the customer asked for, and\ncosts at most 15% past the budget it would exceed. ``reasons`` say exactly\nwhat it matches that the current pick does not; nothing here claims a\nproduct is nicer or of higher quality."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VocabularyResponse": {
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/app__routers__meta__TermResponse"
+            },
+            "type": "array",
+            "title": "Categories"
+          },
+          "colours": {
+            "items": {
+              "$ref": "#/components/schemas/app__routers__meta__TermResponse"
+            },
+            "type": "array",
+            "title": "Colours"
+          },
+          "materials": {
+            "items": {
+              "$ref": "#/components/schemas/app__routers__meta__TermResponse"
+            },
+            "type": "array",
+            "title": "Materials"
+          },
+          "styles": {
+            "items": {
+              "$ref": "#/components/schemas/app__routers__meta__TermResponse"
+            },
+            "type": "array",
+            "title": "Styles"
+          },
+          "room_types": {
+            "items": {
+              "$ref": "#/components/schemas/app__routers__meta__TermResponse"
+            },
+            "type": "array",
+            "title": "Room Types"
+          },
+          "feels": {
+            "items": {
+              "$ref": "#/components/schemas/app__routers__meta__TermResponse"
+            },
+            "type": "array",
+            "title": "Feels"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "categories",
+          "colours",
+          "materials",
+          "styles",
+          "room_types",
+          "feels"
+        ],
+        "title": "VocabularyResponse"
+      },
+      "app__routers__meta__TermResponse": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "en": {
+            "type": "string",
+            "title": "En"
+          },
+          "ar": {
+            "type": "string",
+            "title": "Ar"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "slug",
+          "en",
+          "ar"
+        ],
+        "title": "TermResponse"
+      },
+      "app__search__responses__TermResponse": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "slug",
+          "label"
+        ],
+        "title": "TermResponse",
+        "description": "A resolved vocabulary term: a stable slug and a label to show."
+      }
+    }
+  }
+}

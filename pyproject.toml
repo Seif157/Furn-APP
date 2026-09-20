@@ -1,0 +1,49 @@
+[project]
+name = "furniture-ai-api"
+version = "0.1.0"
+description = "Phase 1 backend for the Furniture AI marketplace"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0,<1.0.0",
+    # Runtime, not dev: every outbound call (Supabase Auth, the catalogue, the
+    # AI provider, product photos) goes through it. Listed only as a dev
+    # dependency, a production install without dev tools failed at import.
+    "httpx>=0.28.0,<1.0.0",
+    "pydantic-settings>=2.8.0,<3.0.0",
+    "uvicorn[standard]>=0.34.0,<1.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pglast>=7.7,<8.0",
+    "pytest>=8.3.0,<10.0.0",
+    "ruff>=0.11.0,<1.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# SQL templates embedded in the Phase 3.2D generator keep the migration's
+# own line layout; wrapping them would change the generated artifacts.
+"tests/phase_3_2d_package.py" = ["E501"]
+# The seed catalogue is a data table; one product per line keeps it reviewable.
+"tests/seed_catalogue.py" = ["E501"]
+# SQL text inside the undo-snapshot builder and the replica tests keeps the
+# layout PostgreSQL will run; wrapping it would change the queries.
+"scripts/build_32d_undo_snapshot.py" = ["E501"]
+"scripts/replica_*.py" = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
