@@ -359,6 +359,62 @@ def test_every_planned_product_is_a_real_catalogue_row(catalogue) -> None:
     assert all(item.candidate.product.id in ids for item in plan.items)
 
 
+# --- the room and the style the customer named ----------------------------------
+#
+# These exist because a live room plan returned 502 on 2026-09-20 for "أوضة
+# معيشة". Style and room had become vocabulary slugs everywhere else, and the
+# room parser was still handing SoftPreferences the customer's own words, which
+# it now refuses. Nothing here covered it: the image-prompt tests pass their own
+# strings and never go through the parser.
+
+
+@pytest.mark.parametrize(
+    ("surface", "slug"),
+    [
+        ("living room", "living_room"),
+        ("أوضة معيشة", "living_room"),
+        ("ريسبشن", "reception"),
+        ("Bedroom", "bedroom"),
+    ],
+)
+def test_a_room_named_in_any_form_is_resolved_not_refused(
+    surface: str, slug: str
+) -> None:
+    specification = spec({**ARABIC_DRAFT, "room_type": surface})
+
+    assert specification.room_type == slug
+    assert specification.slots
+    assert all(slot.soft.room_type == slug for slot in specification.slots)
+    assert specification.unresolved == ()
+
+
+def test_a_style_named_in_either_language_reaches_the_same_slug() -> None:
+    english = spec({**ARABIC_DRAFT, "styles": ["Modern", "scandinavian"]})
+    arabic = spec({**ARABIC_DRAFT, "styles": ["مودرن", "إسكندنافي"]})
+
+    assert english.styles == arabic.styles == ("modern", "scandinavian")
+    assert all(slot.soft.styles == ("modern", "scandinavian") for slot in english.slots)
+
+
+def test_a_room_nobody_recognises_costs_the_room_not_the_plan() -> None:
+    specification = spec({**ARABIC_DRAFT, "room_type": "wine cellar"})
+
+    assert specification.room_type is None
+    # The room still gets planned: an unknown word is a lost preference, not a
+    # reason to refuse a customer who asked for three real pieces.
+    assert len(specification.slots) == 3
+    assert [(t.field, t.surface) for t in specification.unresolved] == [
+        ("room_type", "wine cellar")
+    ]
+
+
+def test_an_unknown_style_is_reported_and_the_known_one_kept() -> None:
+    specification = spec({**ARABIC_DRAFT, "styles": ["modern", "brutalist"]})
+
+    assert specification.styles == ("modern",)
+    assert [t.surface for t in specification.unresolved] == ["brutalist"]
+
+
 # --- the image prompt ---------------------------------------------------------
 
 

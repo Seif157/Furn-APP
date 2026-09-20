@@ -14,7 +14,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.catalog.models import ProductResponse, StrictResponseModel
-from app.catalog.normalization import CATEGORIES
+from app.catalog.normalization import CATEGORIES, ROOM_TYPES, STYLES
 from app.catalog.transform import build_product_response
 from app.catalog.upstream_models import UpstreamProduct
 from app.recommendations.explanations import format_money, match_reasons
@@ -351,8 +351,16 @@ def build_room_plan_response(
                 )
                 for item, colour_id in zip(items, colour_ids, strict=True)
             ),
-            room_type=specification.room_type,
-            styles=specification.styles[:5],
+            # The prompt is English prose, so the slugs go back to words:
+            # "a modern living room", never "a modern living_room".
+            room_type=(
+                ROOM_TYPES.term(specification.room_type).english
+                if specification.room_type
+                else None
+            ),
+            styles=tuple(
+                STYLES.term(slug).english for slug in specification.styles[:5]
+            ),
             language=lang,
         )
         if items

@@ -203,6 +203,20 @@ determinism there would mean either dropping feels or pretending to a precision
 that is not there. A borderline feel is worth at most 0.6 of one soft component
 and only when a customer asks for that feel.
 
+**A regression the tests did not catch.** Making style and room vocabulary
+slugs broke the room planner, which was still handing `SoftPreferences` the
+customer's own words. `POST /v1/rooms/plan` returned 502 for "عايز أوضة معيشة
+مودرن" on the first live run after the change, because `"living room"` is not
+the slug `living_room` and the specification refused it, which the router reads
+as an untrustworthy answer.
+
+Nothing covered it: the room parser's tests never set a room or a style, and
+the image-prompt tests pass their own strings without going through the parser.
+The room parser now resolves both through the same vocabularies, an unknown
+room costs the preference rather than the plan, and the slugs turn back into
+words for the image prompt so it reads "a modern living room". Six parser tests
+and one end-to-end test now fail without the fix.
+
 **Triage refuses correctly.** "عايز حد يصلح الغسالة" — a washing machine, which
 this marketplace does not service — returned no services, twice, rather than
 reaching for the nearest thing. That is the behaviour that makes choosing by

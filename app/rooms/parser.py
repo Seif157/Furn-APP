@@ -21,6 +21,8 @@ from app.catalog.normalization import (
     CATEGORIES,
     COLOURS,
     MATERIALS,
+    ROOM_TYPES,
+    STYLES,
     Vocabulary,
     normalize_text,
 )
@@ -66,12 +68,6 @@ def _resolve(
         elif term.slug not in slugs:
             slugs.append(term.slug)
     return tuple(slugs)
-
-
-def _normalized(values: Iterable[str]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(normalize_text(v) for v in values if normalize_text(v)))[
-        :MAX_TERMS
-    ]
 
 
 def _checked_budget(value: Decimal | None) -> Decimal | None:
@@ -152,8 +148,18 @@ def specification_from_room_draft(draft: RoomDraft, *, query: str) -> RoomSpecif
         field="preferred_colours",
         unresolved=unresolved,
     )
-    styles = _normalized(draft.styles)
-    room_type = normalize_text(draft.room_type) if draft.room_type else None
+    # Styles and rooms are vocabulary slugs, like colours and materials, so
+    # that the room planner and search mean the same words. Free text here
+    # reached SoftPreferences unresolved and was refused as an untrustworthy
+    # answer: a live room plan returned 502 for "أوضة معيشة" on 2026-09-20.
+    styles = _resolve(STYLES, draft.styles, field="styles", unresolved=unresolved)
+    room_types = _resolve(
+        ROOM_TYPES,
+        (draft.room_type,) if draft.room_type else (),
+        field="room_type",
+        unresolved=unresolved,
+    )
+    room_type = room_types[0] if room_types else None
 
     # Merged by resolved category, so "a chair ... and another chair" is one
     # slot of two. Two slots of the same category could otherwise pick two

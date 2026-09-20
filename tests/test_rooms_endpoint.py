@@ -198,6 +198,33 @@ async def test_the_arabic_example_plans_a_room_within_budget() -> None:
 
 
 @pytest.mark.anyio
+async def test_a_room_the_customer_names_plans_instead_of_failing() -> None:
+    """The live 502 of 2026-09-20, end to end.
+
+    The shared draft above names no room and no style, which is exactly why
+    nothing caught it: with either one present, the parser handed
+    SoftPreferences raw words it no longer accepts and the whole plan came back
+    as an untrustworthy answer.
+    """
+
+    named = {**ARABIC_DRAFT, "room_type": "أوضة معيشة", "styles": ["مودرن"]}
+
+    async with room_client(seed_catalogue, StubProvider(named)) as client:
+        response = await client.post(
+            "/v1/rooms/plan",
+            json={"query": "عايز أوضة معيشة مودرن فيها كنبة و2 كرسي وترابيزة"},
+            headers=auth_headers(),
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["items"]
+    # The image prompt is English prose, so the slug goes back to being words.
+    assert payload["image_request"]["room_type"] == "living room"
+    assert payload["image_request"]["styles"] == ["modern"]
+
+
+@pytest.mark.anyio
 async def test_the_plan_hands_back_exactly_what_the_image_endpoint_needs() -> None:
     async with room_client(seed_catalogue, StubProvider()) as client:
         payload = (
