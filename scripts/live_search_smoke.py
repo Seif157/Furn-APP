@@ -43,6 +43,10 @@ SENTENCES = (
     "عايز كنبة مودرن بيج أقل من ٣٠ ألف",
     "a beech wood bed under 20000",
     "عايز كنبة بمية جنيه",
+    # Nothing in the catalogue states a feel, so this one is answered entirely
+    # by the inferred tags applied on 2026-09-20. Its reasons should carry
+    # "(our guess)" / "(تقديرنا)"; without tags it ranks on the words alone.
+    "عايز كنبة دافئة ومريحة للريسبشن",
 )
 
 
@@ -88,19 +92,29 @@ def show_search(sentence: str, response: httpx.Response) -> bool:
         f"  ok  language={payload['language']}  "
         f"matched {payload['match_count']} of {payload['candidate_count']}"
     )
+    if payload.get("personalized"):
+        print("      (ordering used this customer's own purchase history)")
     for item in payload["items"][:3]:
         product = item["product"]
         pays = product["discount_price"] or product["price"]
         print(f"    - {product['name']}  pays {pays}")
         for reason in item["reasons"]:
-            print(f"        {reason['text']}")
+            # A guess is marked here exactly as the app must mark it.
+            mark = "~" if reason.get("basis") == "inferred" else " "
+            print(f"      {mark} {reason['text']}")
     for alternative in payload["alternatives"]:
         product = alternative["product"]
         pays = product["discount_price"] or product["price"]
         missed = "; ".join(reason["text"] for reason in alternative["missed"])
         print(f"    ~ alternative: {product['name']}  pays {pays}  ({missed})")
+    for offer in payload.get("seller_offers", []):
+        print(f"    + made to order: {offer['title']}  ({offer['label']})")
     if payload["clarification"]:
         print(f"    asks: {payload['clarification']}")
+    asked = payload.get("follow_up")
+    if asked:
+        options = " / ".join(option["label"] for option in asked["options"])
+        print(f"    offers: {asked['question']}  [{options}]")
     return True
 
 
