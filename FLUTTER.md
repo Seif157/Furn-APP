@@ -139,7 +139,7 @@ input lengths and counters instead of hard-coding them.
 
 ---
 
-## 5. Eight rules that are not optional
+## 5. Nine rules that are not optional
 
 1. **Every decimal is a JSON string.** `double.parse(json['price'] as String)`.
    A direct `as double` throws. This will be your first bug if you skip it.
@@ -159,6 +159,12 @@ input lengths and counters instead of hard-coding them.
    a catalogue fact, or hide it. Never present it as a fact.
 8. **Label AI previews.** Show the room preview's `label` and `disclaimer` with
    the image. The product list is what is sold; the picture is an illustration.
+9. **`awaiting_answer: true` is a question, not an empty result.** The sentence
+   asked for nothing — "عايز أثاث", or something off-topic entirely — so
+   `items` is empty deliberately and `match_count` is 0. Show `follow_up`.
+   Never render "no results found" for it: nothing was searched for, so nothing
+   was missing. `candidate_count` still says how many products were examined,
+   if you want a number on the screen.
 
 ---
 
@@ -181,8 +187,9 @@ final res = await http.post(
 
 The response carries the products, what the backend understood (`interpretation`),
 why each one matched (`reasons`), near misses when nothing matched
-(`alternatives`), and a tappable follow-up question when the sentence was too
-vague (`follow_up`).
+(`alternatives`), a tappable follow-up question when the sentence was too vague
+(`follow_up`), and `awaiting_answer`, which tells you to show that question
+instead of an empty list.
 
 A full Dart client, with the decimal parsing already correct, is in
 `docs/flutter-search-contract.md` under "Copy this". Copy that rather than
