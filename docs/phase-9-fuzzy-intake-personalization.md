@@ -40,7 +40,9 @@ never write one; rows are written by the owner from a reviewed file.
 
 Migration: `migrations/product-search-tags-2026-09-20.sql`, with `-undo.sql`,
 `-verify.sql` (9 checks) and `scripts/replica_search_tags_test.py` (24 checks
-against a real throwaway PostgreSQL, wired into CI). **Not applied.**
+against a real throwaway PostgreSQL, wired into CI). **Applied live on
+2026-09-20, verification 9/9**, then filled by
+`seed/search-tags-2026-09-20.sql` with 277 tags over all 45 products.
 
 ### A guess may rank, never filter, and is always labelled
 
@@ -208,10 +210,12 @@ position worth the indirection.
 
 ## What is not done
 
-- **The tag migration has not been applied** and no tags exist, so fuzzy
-  ranking is inert: a search for "cosy" behaves exactly as it did yesterday.
-  Order: apply the migration, run the derivation script, read the generated
-  file, run it.
+- **`modern` is on 36 of 45 products.** A tag that covers 80% of the catalogue
+  cannot reorder anything, so "modern sofa" ranks about as it did before; the
+  rare tags (scandinavian, industrial, luxury, space_saving, hotel_like) are
+  where the difference shows. The fix, if real searches justify it, is to weigh
+  a tag by how rare it is. Not done: it should be decided from observed
+  searches, not from this one observation.
 - **The live measurement is a smoke test, not an evaluation.** Four products,
   five triage cases and three briefs, against Phase 5D's 16 cases at 3 repeats
   with computed ground truth. The service directory it uses is invented, so

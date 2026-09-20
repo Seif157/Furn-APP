@@ -79,14 +79,20 @@ Phase 10A/C  Request logging, rate limits, cache   COMMITTED, VERIFIED LOCALLY
 Phase 7A     Clarification with tappable answers   IMPLEMENTED LOCALLY 2026-09-20
 Phase 9B/6.10 Personalization + seller fallback    IMPLEMENTED LOCALLY 2026-09-20
 Intake AI    Service triage + furnishing brief     IMPLEMENTED LOCALLY 2026-09-20
-Fuzzy search Inferred style/room/feel tags         CODE LOCAL; MIGRATION NOT APPLIED
+Fuzzy search Inferred style/room/feel tags         APPLIED LIVE 2026-09-20, VERIFIED (9/9)
 ```
 
-The 2026-09-20 work is in docs/phase-9-fuzzy-intake-personalization.md. Note
-what is inert until a migration runs: fuzzy ranking needs
-`migrations/product-search-tags-2026-09-20.sql` applied and
-`scripts/derive_search_tags.py` run, and until then a search for "cosy"
-behaves exactly as it did before.
+The 2026-09-20 work is in docs/phase-9-fuzzy-intake-personalization.md.
+
+Fuzzy search is live. `migrations/product-search-tags-2026-09-20.sql` was
+applied on 2026-09-20 (verification 9/9) and `seed/search-tags-2026-09-20.sql`
+loaded 277 inferred style, room and feel tags over all 45 eligible products,
+read back through PostgREST as an anonymous visitor. These are the first rows
+in this project that are not marketplace facts: they rank, never filter, cap
+below a seller-confirmed attribute, and every reason built from one is
+labelled a guess. `modern` sits on 36 of the 45 products, so a "modern" search
+barely reorders; the discriminating tags are the rarer ones (scandinavian,
+industrial, luxury, space_saving, hotel_like, cosy).
 
 The three new prompts were measured live on 2026-09-20 with
 `scripts/live_intake_smoke.py` (tagging, triage, brief; Gemini only, no
@@ -1297,7 +1303,7 @@ OPTIMIZATION
 INTAKE (new 2026-09-20)
 ├── Service triage      POST /v1/intake/service     IMPLEMENTED LOCALLY
 ├── Furnishing brief    POST /v1/intake/furnishing  IMPLEMENTED LOCALLY
-└── Inferred tags       product_search_tag          MIGRATION NOT APPLIED
+└── Inferred tags       product_search_tag          APPLIED LIVE 2026-09-20 (277 tags)
 
 PRODUCTION
 ├── Phase 10A Observability                   PARTIAL (request id + log line)
